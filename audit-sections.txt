@@ -1,0 +1,118 @@
+MySQL Security Audit Checklist
+1. Automated Audits
+
+These recommendations can be fully automated and validated with a pass/fail result.
+
+1. Operating System Level Configuration
+ID	Control
+1.2	Use a dedicated least-privileged account for the MySQL daemon/service
+1.3	Disable MySQL command history
+1.4	Verify that the MYSQL_PWD environment variable is not in use
+1.5	Ensure interactive login is disabled
+1.6	Verify that MYSQL_PWD is not set in users' profiles
+2. Installation and Planning
+ID	Control
+2.1.4	Implement point-in-time recovery
+2.2.1	Ensure binary and relay logs are encrypted
+2.7	Ensure password_lifetime ≤ 365
+2.8	Ensure password resets require strong passwords
+2.9	Require current password for password reset
+2.12	Ensure AES encryption mode for AES_ENCRYPT / AES_DECRYPT is configured correctly
+2.14	Ensure MySQL is bound to a specific IP address
+2.15	Limit accepted TLS versions
+2.16	Require client-side certificates (X.509)
+2.17	Ensure only approved ciphers are used
+2.18	Implement connection delays to limit failed login attempts
+3. File Permissions
+ID	Control
+3.1	Ensure datadir has appropriate permissions
+3.2	Ensure log_bin_basename files have appropriate permissions
+3.3	Ensure log_error has appropriate permissions
+3.4	Ensure slow_query_log has appropriate permissions
+3.5	Ensure relay_log_basename files have appropriate permissions
+3.6	Ensure general_log_file has appropriate permissions
+3.7	Ensure SSL key files have appropriate permissions
+3.8	Ensure plugin directory has appropriate permissions
+4. General Security
+ID	Control
+4.2	Ensure example or test databases are not installed on production servers
+4.3	Ensure allow-suspicious-udfs is set to OFF
+4.4	Harden usage for local_infile on MySQL clients
+4.5	Ensure mysqld is not started with --skip-grant-tables
+4.6	Ensure symbolic links are disabled
+4.7	Ensure secure_file_priv is configured correctly
+4.8	Ensure sql_mode contains STRICT_ALL_TABLES
+4.9	Use MySQL Transparent Data Encryption (TDE) for at-rest data encryption
+6. Auditing and Logging
+ID	Control
+6.1	Ensure log_error is configured correctly
+6.2	Ensure log files are stored on a non-system partition
+6.3	Ensure log_error_verbosity is set to 2
+6.4	Ensure log-raw is set to OFF
+7. Authentication
+ID	Control
+7.1	Ensure authentication_policy is set to a secure option
+7.2	Ensure passwords are not stored in the global configuration
+7.3	Ensure passwords are set for all MySQL accounts
+7.4	Set default_password_lifetime to require a yearly password change
+7.5	Ensure password complexity policies are in place
+7.6	Ensure no users have wildcard hostnames
+7.7	Ensure no anonymous accounts exist
+8. Network Security
+ID	Control
+8.1	Ensure require_secure_transport is set to ON
+8.2	Ensure ssl_type is set to ANY, X509, or SPECIFIED for all remote users
+9. Replication
+ID	Control
+9.2	Ensure SOURCE_SSL_VERIFY_SERVER_CERT is set to YES or 1
+9.3	Ensure SUPER privilege is not granted to replication users
+2. Manual Audits
+
+These recommendations cannot be fully automated and require manual verification or procedures.
+
+1. Operating System Level Configuration
+ID	Control
+1.1	Place databases on non-system partitions
+1.7	Ensure MySQL runs in a sandbox environment
+2. Installation and Planning
+ID	Control
+2.1.1	Ensure a backup policy is in place
+2.1.2	Verify backups are valid and restorable
+2.1.3	Secure backup credentials
+2.1.5	Establish a disaster recovery (DR) plan
+2.1.6	Backup configuration and related files
+2.3	Dedicate the machine running MySQL
+2.4	Do not specify passwords on the command line
+2.5	Do not reuse usernames
+2.6	Ensure non-default, unique cryptographic material is used
+2.10	Use dual passwords for frequent password rotation
+2.11	Lock out accounts not currently in use
+2.13	Use socket peer-credential authentication appropriately
+2.19	Ensure FIPS 140-2 OpenSSL cryptography is used
+4. General Security
+ID	Control
+4.1	Ensure the latest security patches are applied
+5. MySQL Permissions
+ID	Control
+5.1	Ensure only administrative users have full database access
+5.2	Ensure FILE privilege is not granted to non-administrative users
+5.3	Ensure PROCESS privilege is not granted to non-administrative users
+5.4	Ensure SUPER privilege is not granted to non-administrative users
+5.5	Ensure SHUTDOWN privilege is not granted to non-administrative users
+5.6	Ensure CREATE USER privilege is not granted to non-administrative users
+5.7	Ensure GRANT OPTION privilege is not granted to non-administrative users
+5.8	Ensure REPLICATION SLAVE privilege is not granted to non-administrative users
+5.9	Limit DML/DDL grants to specific databases and users
+5.10	Securely define stored procedures/functions using DEFINER and INVOKER
+5.11	Ensure proper use of SET_ANY_DEFINER
+5.12	Ensure proper use of ALLOW_NONEXISTENT_DEFINER
+8. Network Security
+ID	Control
+8.3	Set maximum connection limits for the server and per user
+9. Replication
+ID	Control
+9.1	Ensure replication traffic is secured
+10. MySQL InnoDB Cluster / Group Replication
+ID	Control
+10.1	Ensure all group replication traffic is secured
+10.2	Allowlist approved servers belonging to a MySQL InnoDB cluster
