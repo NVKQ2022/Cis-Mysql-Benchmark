@@ -1,0 +1,69 @@
+---
+# Role: mysql_config_backup_cis_2_1_6
+# Purpose: CIS 2.1.6 - Backup of Configuration (Manual)
+
+- name: "CIS 2.1.6 | Backup configuration and related files"
+  hosts: all
+  become: yes
+
+  vars:
+    backup_dir: /backup/mysql
+    config_dirs:
+      - /etc/mysql
+      - /etc/mysql/mysql.conf.d
+      - /var/lib/mysql-files
+
+  tasks:
+
+    # 1. Create backup directory
+    - name: "Ensure backup directory exists"
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: '0755'
+
+    # 2. Create config backup
+    - name: "Backup MySQL configuration files"
+      shell: "tar -czvf {{ backup_dir }}/mysql_config_backup.tar.gz {{ config_dirs | join(' ') }} 2>/dev/null"
+      register: config_backup
+      changed_when: true
+
+    # 3. List config files backed up
+    - name: "List backed up config files"
+      shell: "tar -tzf {{ backup_dir }}/mysql_config_backup.tar.gz 2>/dev/null | head -20"
+      register: config_list
+      changed_when: false
+      failed_when: false
+
+    # 4. Generate audit report
+    - name: "Generate config backup report"
+      copy:
+        dest: /root/cis-audit-reports/2.1.6_config_backup.txt
+        mode: '0644'
+        content: |
+          ==========================================
+          CIS MySQL 8.4 - Audit Report 2.1.6
+          ==========================================
+          Control: Backup of Configuration
+          Date: {{ ansible_date_time.iso8601 }}
+          Host: {{ inventory_hostname }}
+          ==========================================
+
+          CONFIG BACKUP STATUS:
+          - Backup Location: {{ backup_dir }}/mysql_config_backup.tar.gz
+          - Status: {% if config_backup.rc == 0 %}SUCCESS{% else %}FAILED{% endif %}
+
+          BACKED UP FILES:
+          {{ config_list.stdout | default('None') }}
+
+          FILES INCLUDED:
+          {% for dir in config_dirs %}
+          - {{ dir }}
+          {% endfor %}
+
+          STATUS: {% if config_backup.rc == 0 %}PASS{% else %}FAIL{% endif %}
+
+          CIS BENCHMARK:
+          "Configuration files including my.cnf and related settings
+          should be backed up regularly."
+          ==========================================

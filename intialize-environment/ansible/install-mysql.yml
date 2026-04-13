@@ -1,0 +1,90 @@
+---
+- name: Install and Configure MySQL 8.4 for CIS Benchmark
+  hosts: mysql_servers
+  become: yes
+  vars:
+    mysql_root_password: "YourSecurePassword123!"
+    mysql_version: "8.4"
+    cis_benchmark_version: "1.1.0"
+
+  tasks:
+    # ========================================================
+    # Package Installation
+    # ========================================================
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install MySQL Server and dependencies
+      ansible.builtin.apt:
+        name:
+          - mysql-server
+          - mysql-client
+          - python3-pymysql
+          - openssl
+        state: present
+
+    # ========================================================
+    # Service Configuration
+    # ========================================================
+    - name: Ensure MySQL service is started and enabled
+      ansible.builtin.service:
+        name: mysql
+        state: started
+        enabled: yes
+
+    # ========================================================
+    # Initial Root Password Configuration
+    # ========================================================
+    - name: Set MySQL root password (bootstrap via sudo)
+      ansible.builtin.shell: |
+        mysql -u root <<EOF
+        ALTER USER 'root'@'localhost' IDENTIFIED BY '{{ mysql_root_password }}';
+        FLUSH PRIVILEGES;
+        EOF
+      become: yes
+      register: mysql_bootstrap
+      failed_when: mysql_bootstrap.rc != 0
+
+    - name: Ensure root password works (idempotent)
+      community.mysql.mysql_user:
+        login_user: root
+        login_password: "{{ mysql_root_password }}"
+        name: root
+        host: localhost
+        password: "{{ mysql_root_password }}"
+        priv: "*.*:ALL,GRANT"
+        state: present
+
+    # ========================================================
+    # CIS Security Hardening - Initial Setup
+    # ========================================================
+    - name: Remove test database
+      mysql_db:
+        name: test
+        state: absent
+      become_user: root
+      ignore_errors: yes
+
+    - name: Remove anonymous MySQL users
+      mysql_user:
+        name: ""
+        host_all: yes
+        state: absent
+      ignore_errors: yes
+
+    # ========================================================
+    # Directory Structure for Benchmark
+    # ========================================================
+    - name: Create and set ownership on benchmark directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      with_items:
+        - { path: /backup/mysql, owner: mysql, group: mysql, mode: '0750' }
+        - { path: /var/lib/mysql-files, owner: mysql, group: mysql, mode: '0750' }
+        - { path: /var/log/mysql/audit, owner: mysql, group: mysql, mode: '0750' }

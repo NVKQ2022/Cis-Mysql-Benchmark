@@ -1,0 +1,52 @@
+#cloud-config
+# ============================================================
+# Cloud-init: Configure VM on first boot
+# ============================================================
+
+package_update: true
+packages:
+  - mysql-server
+  - mysql-client
+  - openssl
+  - curl
+  - wget
+
+write_files:
+  - path: /tmp/mysql-setup.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -e
+
+      systemctl start mysql
+      systemctl enable mysql
+
+      sleep 10
+
+      mysql --user=root <<EOSQL
+      ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '${MYSQL_ROOT_PASSWORD}';
+      DELETE FROM mysql.user WHERE User='';
+      DROP DATABASE IF EXISTS test;
+      DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
+      FLUSH PRIVILEGES;
+      EOSQL
+
+      mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<EOSQL
+      CREATE DATABASE IF NOT EXISTS ${MYSQL_DATABASE};
+      CREATE USER IF NOT EXISTS '${MYSQL_USER}'@'%' IDENTIFIED BY '${MYSQL_USER_PASSWORD}';
+      GRANT ALL PRIVILEGES ON ${MYSQL_DATABASE}.* TO '${MYSQL_USER}'@'%';
+      FLUSH PRIVILEGES;
+      EOSQL
+
+      sed -i "s/^bind-address.*/bind-address = 0.0.0.0/" /etc/mysql/mysql.conf.d/mysqld.cnf
+      systemctl restart mysql
+
+      ufw allow 3306/tcp || true
+
+      curl -fsSL https://tailscale.com/install.sh | sh
+      tailscale up --auth-key=${TAILSCALE_AUTH_KEY} --operator=azureuser
+
+runcmd:
+  - bash /tmp/mysql-setup.sh
+
+final_message: "MySQL server setup complete"

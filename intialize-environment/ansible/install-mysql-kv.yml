@@ -1,0 +1,77 @@
+# ============================================================
+# Ansible: Install MySQL with secrets from Key Vault
+# ============================================================
+
+---
+- name: "Install MySQL with Key Vault secrets"
+  hosts: mysql_servers
+  become: yes
+  vars:
+    key_vault_name: "cis-mysql-kv"
+    mysql_root_password: "{{ lookup('env', 'MYSQL_ROOT_PASSWORD') }}"
+
+  tasks:
+    # Get secrets from Key Vault
+    - name: "Get MySQL root password from Key Vault"
+      shell: |
+        az keyvault secret show \
+          --vault-name {{ key_vault_name }} \
+          --name mysql-root-password \
+          --query value \
+          --output tsv
+      register: kv_password
+      changed_when: false
+      failed_when: false
+
+    - name: "Set MySQL password fact"
+      set_fact:
+        mysql_password: "{{ kv_password.stdout }}"
+
+    # Install MySQL
+    - name: "Update apt cache"
+      apt:
+        update_cache: yes
+
+    - name: "Install MySQL Server"
+      apt:
+        name:
+          - mysql-server
+          - mysql-client
+        state: present
+
+    # Configure MySQL
+    - name: "Start MySQL service"
+      service:
+        name: mysql
+        state: started
+        enabled: yes
+
+    - name: "Set root password"
+      mysql_user:
+        name: root
+        host: localhost
+        password: "{{ mysql_password }}"
+        priv: '*.*:ALL,GRANT'
+      when: mysql_password | length > 0
+      ignore_errors: yes
+
+    - name: "Remove test database"
+      mysql_db:
+        name: test
+        state: absent
+      become: yes
+      when: mysql_password | length > 0
+
+    - name: "Remove anonymous users"
+      mysql_user:
+        name: ""
+        host_all: yes
+        state: absent
+      become: yes
+      when: mysql_password | length > 0
+
+    - name: "Display installation status"
+      debug:
+        msg: |
+          MySQL installed successfully!
+          Password from Key Vault: {{ mysql_password[:4] }}****

@@ -1,0 +1,84 @@
+---
+# Role: mysql_dedicated_host_cis_2_3
+# Purpose: CIS 2.3 - Dedicate the Machine Running MySQL (Manual)
+
+- name: "CIS 2.3 | Dedicate machine for MySQL"
+  hosts: all
+  become: yes
+
+  vars:
+    conflicting_services:
+      - apache2
+      - nginx
+      - httpd
+      - postgresql
+      - mongodb
+      - redis
+      - rabbitmq
+
+  tasks:
+
+    # 1. Check for MySQL service
+    - name: "Verify MySQL service is running"
+      shell: "systemctl is-active mysql || systemctl is-active mysqld"
+      register: mysql_running
+      changed_when: false
+      failed_when: false
+
+    # 2. Check for conflicting services
+    - name: "Check for conflicting services"
+      shell: |
+        CONFLICTS=""
+        for svc in {{ conflicting_services | join(' ') }}; do
+          if systemctl is-active $svc &>/dev/null; then
+            CONFLICTS="$CONFLICTS $svc"
+          fi
+        done
+        if [ -z "$CONFLICTS" ]; then
+          echo "NONE"
+        else
+          echo "$CONFLICTS"
+        fi
+      register: conflict_check
+      changed_when: false
+      failed_when: false
+
+    # 3. Get system resources
+    - name: "Get system resource usage"
+      shell: "echo 'Memory: $(free -h | awk \"/^Mem:/ {print \$3}\") / $(free -h | awk \"/^Mem:/ {print \$2}\")'; echo 'Load: $(uptime | awk -F\"load average:\" \"{print \$2}\")'"
+      register: system_resources
+      changed_when: false
+
+    # 4. Generate audit report
+    - name: "Generate dedicated host report"
+      copy:
+        dest: /root/cis-audit-reports/2.3_dedicated_host.txt
+        mode: '0644'
+        content: |
+          ==========================================
+          CIS MySQL 8.4 - Audit Report 2.3
+          ==========================================
+          Control: Dedicate the Machine Running MySQL
+          Date: {{ ansible_date_time.iso8601 }}
+          Host: {{ inventory_hostname }}
+          ==========================================
+
+          MYSQL STATUS:
+          - MySQL Running: {{ 'YES' if mysql_running.rc == 0 else 'NO' }}
+
+          CONFLICTING SERVICES:
+          {% if 'NONE' in conflict_check.stdout %}
+             [PASS] No conflicting services detected
+          {% else %}
+             [WARN] Conflicting services found:{{ conflict_check.stdout }}
+          {% endif %}
+
+          SYSTEM RESOURCES:
+          {{ system_resources.stdout }}
+
+          STATUS: {% if 'NONE' in conflict_check.stdout %}PASS{% else %}WARN{% endif %}
+
+          CIS BENCHMARK:
+          "The machine running MySQL should be dedicated to MySQL.
+          Avoid running other services on the same host."
+          ==========================================

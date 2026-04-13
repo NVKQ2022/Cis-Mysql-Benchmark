@@ -1,0 +1,92 @@
+---
+# Role: mysql_backup_cis_2_1_1
+# Purpose: Implement CIS 2.1.1 - Backup Policy in Place (Manual)
+
+- name: "CIS 2.1.1 | Ensure MySQL backup policy and automation"
+  hosts: all
+  become: yes
+
+  vars:
+    backup_dir: /backup/mysql
+    backup_script: /usr/local/bin/mysql_backup.sh
+    mysql_user: root
+    mysql_password: "CHANGE_ME"   # Use ansible-vault in production
+    backup_hour: "2"
+    backup_minute: "0"
+    retention_days: 7
+
+  tasks:
+
+    # 1. Create secure backup directory
+    - name: "Create backup directory"
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    # 2. Deploy backup script
+    - name: "Install MySQL backup script"
+      copy:
+        dest: "{{ backup_script }}"
+        mode: '0700'
+        content: |
+          #!/bin/bash
+          DATE=$(date +%F-%H-%M)
+          BACKUP_DIR="{{ backup_dir }}"
+          MYSQL_USER="{{ mysql_user }}"
+          MYSQL_PASSWORD="{{ mysql_password }}"
+
+          mkdir -p $BACKUP_DIR
+
+          mysqldump -u $MYSQL_USER -p$MYSQL_PASSWORD --all-databases > $BACKUP_DIR/mysql-$DATE.sql
+
+          gzip $BACKUP_DIR/mysql-$DATE.sql
+
+          # Cleanup old backups
+          find $BACKUP_DIR -type f -mtime +{{ retention_days }} -delete
+
+    # 3. Configure cron job (CIS audit requirement)
+    - name: "Schedule MySQL backup cron job"
+      cron:
+        name: "CIS MySQL Backup"
+        minute: "{{ backup_minute }}"
+        hour: "{{ backup_hour }}"
+        job: "{{ backup_script }}"
+
+    # 4. Ensure policy documentation exists (Manual control requirement)
+    - name: "Create backup policy documentation"
+      copy:
+        dest: /etc/mysql_backup_policy.txt
+        mode: '0644'
+        content: |
+          CIS 2.1.1 - MySQL Backup Policy
+
+          Scope:
+          - All MySQL databases including system database (mysql)
+
+          Backup Strategy:
+          - Full backup using mysqldump
+
+          Schedule:
+          - Daily at {{ backup_hour }}:{{ backup_minute }}
+
+          Retention:
+          - {{ retention_days }} days
+
+          Storage:
+          - {{ backup_dir }}
+
+          Security:
+          - Directory restricted to root only
+
+          Recovery:
+          - Restore testing should be performed periodically
+
+    # 5. Validate cron job exists (Audit support)
+    - name: "Validate cron job is configured"
+      shell: crontab -l | grep "{{ backup_script }}"
+      register: cron_check
+      changed_when: false
+      failed_when: cron_check.rc != 0

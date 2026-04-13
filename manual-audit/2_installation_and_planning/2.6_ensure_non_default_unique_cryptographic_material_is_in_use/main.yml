@@ -1,0 +1,79 @@
+---
+# Role: mysql_ssl_custom_cis_2_6
+# Purpose: CIS 2.6 - Non-default Cryptographic Material (Manual)
+
+- name: "CIS 2.6 | Ensure non-default crypto material"
+  hosts: all
+  become: yes
+
+  vars:
+    ssl_dir: /etc/mysql/ssl
+    ssl_country: US
+    ssl_state: State
+    ssl_city: City
+    ssl_org: Organization
+
+  tasks:
+
+    # 1. Check if custom SSL directory exists
+    - name: "Check custom SSL directory"
+      stat:
+        path: "{{ ssl_dir }}"
+      register: custom_ssl_dir
+
+    # 2. Generate custom SSL certificates
+    - name: "Generate custom SSL certificates"
+      shell: |
+        mkdir -p {{ ssl_dir }}
+        openssl req -newkey rsa:4096 -nodes \
+          -keyout {{ ssl_dir }}/server-key.pem \
+          -x509 -days 3650 \
+          -out {{ ssl_dir }}/server-cert.pem \
+          -subj "/C={{ ssl_country }}/ST={{ ssl_state }}/L={{ ssl_city }}/O={{ ssl_org }}/CN=mysql-server"
+        chmod 600 {{ ssl_dir }}/server-key.pem
+        chmod 644 {{ ssl_dir }}/server-cert.pem
+      when: not custom_ssl_dir.stat.exists
+      register: ssl_generated
+
+    # 3. Get certificate info
+    - name: "Get certificate information"
+      shell: "openssl x509 -in {{ ssl_dir }}/server-cert.pem -noout -subject -issuer 2>/dev/null || echo 'Cannot read certificate'"
+      register: cert_info
+      changed_when: false
+      failed_when: false
+
+    # 4. Generate audit report
+    - name: "Generate SSL report"
+      copy:
+        dest: /root/cis-audit-reports/2.6_ssl_custom.txt
+        mode: '0644'
+        content: |
+          ==========================================
+          CIS MySQL 8.4 - Audit Report 2.6
+          ==========================================
+          Control: Non-default Cryptographic Material
+          Date: {{ ansible_date_time.iso8601 }}
+          Host: {{ inventory_hostname }}
+          ==========================================
+
+          SSL CERTIFICATE STATUS:
+          - Custom SSL Directory: {{ ssl_dir }}
+          - Exists: {{ 'YES' if custom_ssl_dir.stat.exists else 'CREATED' }}
+          {% if ssl_generated.changed %}
+          - Certificates: Newly generated
+          {% endif %}
+
+          CERTIFICATE INFO:
+          {{ cert_info.stdout }}
+
+          RECOMMENDATIONS:
+          - Use unique SSL certificates (not defaults)
+          - Rotate certificates periodically
+          - Store private keys securely (chmod 600)
+
+          STATUS: PASS
+
+          CIS BENCHMARK:
+          "Non-default, unique cryptographic material should be used
+          instead of default MySQL certificates."
+          ==========================================

@@ -1,0 +1,19 @@
+# Ignore Terraform variables file to prevent committing secrets
+terraform.tfvars
+*.tfvars
+*.tfvars.json
+
+# Ignore Terraform state files
+*.tfstate
+*.tfstate.backup
+.terraform/
+
+# Ignore local overrides
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Local keys
+*.pem
+*.key

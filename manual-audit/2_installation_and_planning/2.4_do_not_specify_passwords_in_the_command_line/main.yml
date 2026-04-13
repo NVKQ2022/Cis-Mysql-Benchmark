@@ -1,0 +1,89 @@
+---
+# Role: mysql_password_cli_cis_2_4
+# Purpose: CIS 2.4 - Do Not Specify Passwords on Command Line (Manual)
+
+- name: "CIS 2.4 | No passwords on command line"
+  hosts: all
+  become: yes
+
+  tasks:
+
+    # 1. Check process list for passwords
+    - name: "Check process list for passwords in command line"
+      shell: "ps aux | grep -E 'mysql.*-p' | grep -v grep || echo 'NONE'"
+      register: process_check
+      changed_when: false
+      failed_when: false
+
+    # 2. Check user crontab
+    - name: "Check user crontab for passwords"
+      shell: "crontab -l 2>/dev/null | grep -E 'mysql.*-p' || echo 'NONE'"
+      register: user_cron
+      changed_when: false
+      failed_when: false
+
+    # 3. Check system crontab
+    - name: "Check system crontab for passwords"
+      shell: "grep -r 'mysql.*-p' /etc/cron* 2>/dev/null || echo 'NONE'"
+      register: system_cron
+      changed_when: false
+      failed_when: false
+
+    # 4. Check bash history
+    - name: "Check bash history for passwords"
+      shell: "grep -E 'mysql.*-p|password.*=' /root/.bash_history 2>/dev/null | grep -v '^#' | head -5 || echo 'NONE'"
+      register: history_check
+      changed_when: false
+      failed_when: false
+
+    # 5. Generate audit report
+    - name: "Generate command line password report"
+      copy:
+        dest: /root/cis-audit-reports/2.4_passwords_cli.txt
+        mode: '0644'
+        content: |
+          ==========================================
+          CIS MySQL 8.4 - Audit Report 2.4
+          ==========================================
+          Control: Do Not Specify Passwords on Command Line
+          Date: {{ ansible_date_time.iso8601 }}
+          Host: {{ inventory_hostname }}
+          ==========================================
+
+          SECURITY CHECKS:
+
+          1. Process List:
+          {% if 'NONE' in process_check.stdout %}
+             [PASS] No passwords in process list
+          {% else %}
+             [FAIL] Passwords found in process list:
+             {{ process_check.stdout }}
+          {% endif %}
+
+          2. User Crontab:
+          {% if 'NONE' in user_cron.stdout %}
+             [PASS] No passwords in user crontab
+          {% else %}
+             [FAIL] Passwords found in user crontab
+          {% endif %}
+
+          3. System Crontab:
+          {% if 'NONE' in system_cron.stdout %}
+             [PASS] No passwords in system crontab
+          {% else %}
+             [FAIL] Passwords found in system crontab
+          {% endif %}
+
+          4. Bash History:
+          {% if 'NONE' in history_check.stdout %}
+             [PASS] No passwords in bash history
+          {% else %}
+             [WARN] Potential passwords in history
+          {% endif %}
+
+          OVERALL STATUS: {% if 'NONE' in process_check.stdout and 'NONE' in user_cron.stdout and 'NONE' in system_cron.stdout %}PASS{% else %}FAIL{% endif %}
+
+          CIS BENCHMARK:
+          "Passwords should not be specified on the command line.
+          Use mysql_config_editor or configuration files."
+          ==========================================

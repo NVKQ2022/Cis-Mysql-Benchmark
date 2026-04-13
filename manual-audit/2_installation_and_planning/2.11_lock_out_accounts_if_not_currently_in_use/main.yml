@@ -1,0 +1,71 @@
+---
+# Role: mysql_account_lock_cis_2_11
+# Purpose: CIS 2.11 - Lock Out Unused Accounts (Manual)
+
+- name: "CIS 2.11 | Lock out unused accounts"
+  hosts: all
+  become: yes
+
+  vars:
+    mysql_password: "CHANGE_ME"
+    inactive_days: 90
+
+  tasks:
+
+    # 1. Get all users with lock status
+    - name: "List all users with lock status"
+      shell: "mysql -u root -p'{{ mysql_password }}' -e \"SELECT user, host, account_locked, password_last_changed FROM mysql.user;\" 2>/dev/null"
+      register: all_users
+      changed_when: false
+      failed_when: false
+
+    # 2. Find locked accounts
+    - name: "Find locked accounts"
+      shell: "mysql -u root -p'{{ mysql_password }}' -e \"SELECT user, host FROM mysql.user WHERE account_locked='Y';\" 2>/dev/null"
+      register: locked_users
+      changed_when: false
+      failed_when: false
+
+    # 3. Find inactive accounts
+    - name: "Find inactive accounts (>90 days)"
+      shell: "mysql -u root -p'{{ mysql_password }}' -N -e \"SELECT CONCAT(user, '@', host) FROM mysql.user WHERE password_last_changed < DATE_SUB(NOW(), INTERVAL {{ inactive_days }} DAY);\" 2>/dev/null || echo 'NONE'"
+      register: inactive_users
+      changed_when: false
+      failed_when: false
+
+    # 4. Generate audit report
+    - name: "Generate account lockout report"
+      copy:
+        dest: /root/cis-audit-reports/2.11_account_lock.txt
+        mode: '0644'
+        content: |
+          ==========================================
+          CIS MySQL 8.4 - Audit Report 2.11
+          ==========================================
+          Control: Lock Out Unused Accounts
+          Date: {{ ansible_date_time.iso8601 }}
+          Host: {{ inventory_hostname }}
+          ==========================================
+
+          ALL MYSQL USERS:
+          {{ all_users.stdout | default('Cannot query MySQL') }}
+
+          LOCKED ACCOUNTS:
+          {{ locked_users.stdout | default('None') }}
+
+          INACTIVE ACCOUNTS (> {{ inactive_days }} days):
+          {{ inactive_users.stdout }}
+
+          MANUAL ACTIONS REQUIRED:
+          To lock an account:
+            ALTER USER 'username'@'host' ACCOUNT LOCK;
+
+          To unlock an account:
+            ALTER USER 'username'@'host' ACCOUNT UNLOCK;
+
+          STATUS: INFO - Review and lock unused accounts
+
+          CIS BENCHMARK:
+          "Accounts that are not currently in use should be locked.
+          Periodically review and lock inactive accounts."
+          ==========================================
