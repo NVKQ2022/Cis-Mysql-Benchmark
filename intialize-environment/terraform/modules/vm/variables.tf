@@ -6,7 +6,7 @@ variable "resource_group_name" {
 variable "remote_backend" {
   description = "Backend resource group name"
   type        = map(string)
-  default     = {
+  default = {
     backend_resource_group_name  = "remotebackend-rg"
     backend_storage_account_name = "remotebackendfortfstate"
     backend_container_name       = "tfstate"
