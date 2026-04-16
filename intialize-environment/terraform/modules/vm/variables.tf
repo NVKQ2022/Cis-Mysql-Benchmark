@@ -3,6 +3,18 @@ variable "resource_group_name" {
   type        = string
 }
 
+variable "remote_backend" {
+  description = "Backend resource group name"
+  type        = map(string)
+  default     = {
+    backend_resource_group_name  = "remotebackend-rg"
+    backend_storage_account_name = "remotebackendfortfstate"
+    backend_container_name       = "tfstate"
+    backend_key                  = "cis-mysql-backend.tfstate"
+  }
+}
+
+
 variable "location" {
   description = "Azure region"
   type        = string
