@@ -8,6 +8,7 @@ on:
         description: 'Terraform version to use'
         required: false
         default: '1.14.3'
+        type: string
 jobs:
   terraform:
     runs-on: ubuntu-latest
