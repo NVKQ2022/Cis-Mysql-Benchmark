@@ -86,7 +86,15 @@
     - name: "1.5 – Set CIS status"
       ansible.builtin.set_fact:
         cis_1_5_status: >-
-          {{ 'PASS' if check_1_5.stdout is match("^(\\/sbin\\/nologin|\\/bin\\/false)") else 'FAIL' }}
+          {{
+            'PASS'
+            if (check_1_5.stdout | trim) in [
+              '/sbin/nologin',
+              '/usr/sbin/nologin',
+              '/bin/false'
+            ]
+            else 'FAIL'
+          }}
         
     - name: "1.5 – Ghi kết quả"
       ansible.builtin.set_fact:
@@ -111,11 +119,19 @@
       register: profile_files
       changed_when: false
 
-    - name: "1.6 – Kiểm tra MYSQL_PWD trong các file"
-      ansible.builtin.shell: >
-        grep -H MYSQL_PWD {{ item.path }} || true
-      loop: "{{ profile_files.files }}"
-      register: check_1_6
+    - name: "1.6 – Tìm file profile cần kiểm tra"
+      ansible.builtin.find:
+        paths:
+          - /home
+          - /root
+        patterns:
+          - ".bashrc"
+          - ".profile"
+          - ".bash_profile"
+        file_type: file
+        hidden: yes
+        recurse: yes
+      register: profile_files
       changed_when: false
 
     - name: "1.6 – Set CIS status"
