@@ -1,0 +1,101 @@
+---
+- name: Init audit log buffer
+  ansible.builtin.set_fact:
+    audit_lines: []
+# ==============================================================================
+# TỰ ĐỘNG ĐÁNH GIÁ Mục 1.1: Place Databases on Non-System Partitions
+# ==============================================================================
+
+- name: CIS 1.1 - Lấy đường dẫn thư mục chứa dữ liệu (datadir)
+  ansible.builtin.command: mysql -N -B -e "SELECT @@datadir;"
+  register: mysql_datadir_output
+  become: yes
+  changed_when: false
+
+- name: CIS 1.1 - Tìm chính xác phân vùng (Mount Point) của datadir
+  # Lệnh df -P xuất định dạng chuẩn, awk 'NR==2 {print $6}' sẽ chỉ lấy đúng tên phân vùng ở dòng số 2
+  ansible.builtin.shell: df -P {{ mysql_datadir_output.stdout }} | awk 'NR==2 {print $6}'
+  register: datadir_mount_point
+  become: yes
+  changed_when: false
+
+- name: CIS 1.1 - Xử lý logic Đánh giá (Pass/Fail)
+  ansible.builtin.set_fact:
+    # Nếu phân vùng nằm trong danh sách cấm (/, /var, /usr) thì Fail, ngược lại là Pass
+    cis_1_1_status: >-
+      {% if datadir_mount_point.stdout in ['/', '/var', '/usr'] %}
+      FAIL
+      {% else %}
+      PASS
+      {% endif %}
+
+- name: "1.1 – Ghi kết quả"
+  ansible.builtin.set_fact:
+    audit_lines: "{{ audit_lines + [ log_block ] }}"
+  vars:
+    log_block: |
+      [1.1] datadir Partition Configuration (Automated - Level 1)
+      datadir           : {{ mysql_datadir_output.stdout | default('(not set)') }}
+      Mounted on        : {{ datadir_mount_point.stdout | default('(unknown)') }}
+      Result            : {{ cis_1_1_status | default('UNKNOWN') }}
+      ----------------------------------------------------------------
+
+
+# ==============================================================================
+# TỰ ĐỘNG ĐÁNH GIÁ Mục 1.7: Ensure MySQL is Run Under a Sandbox Environment
+# ==============================================================================
+
+- name: CIS 1.7 - Kiểm tra cấu hình chroot (Bỏ qua các dòng comment)
+  ansible.builtin.shell: grep -i 'chroot' /etc/mysql/my.cnf /etc/mysql/mysql.conf.d/*.cnf | grep -v '^\s*#' || true
+  register: chroot_check
+  become: yes
+  changed_when: false
+
+- name: CIS 1.7 - Kiểm tra trạng thái cô lập của systemd (Tìm Main PID)
+  ansible.builtin.shell: systemctl status mysql | grep 'Main PID' || true
+  register: systemd_check
+  become: yes
+  changed_when: false
+
+- name: CIS 1.7 - Kiểm tra xem có đang chạy trong Docker không
+  ansible.builtin.shell: docker ps | grep mysql || true
+  register: docker_check
+  become: yes
+  changed_when: false
+
+- name: CIS 1.7 - IN KẾT QUẢ TỪNG MỤC CHECK (DEBUG DỮ LIỆU)
+  ansible.builtin.debug:
+    msg:
+      - "[1] Kết quả Chroot  : '{{ chroot_check.stdout }}'"
+      - "[2] Kết quả Systemd : '{{ systemd_check.stdout }}'"
+      - "[3] Kết quả Docker  : '{{ docker_check.stdout }}'"
+
+- name: CIS 1.7 - Xử lý logic Đánh giá (Pass/Fail)
+  ansible.builtin.set_fact:
+    # Pass nếu thỏa mãn 1 trong 3 điều kiện: Có chroot, KHÔNG chạy dưới quyền root trong systemd, HOẶC chạy trong Docker
+    cis_1_7_status: >-
+      {% if chroot_check.stdout != '' %}
+      PASS (Bảo vệ bằng chroot)
+      {% elif systemd_check.stdout != '' and '(root)' not in systemd_check.stdout %}
+      PASS (Bảo vệ bằng systemd isolation)
+      {% elif docker_check.stdout != '' %}
+      PASS (Bảo vệ bằng Docker container)
+      {% else %}
+      FAIL (Không tìm thấy cơ chế Sandbox nào hợp lệ)
+      {% endif %}
+
+- name: "1.7 – Ghi kết quả"
+  ansible.builtin.set_fact:
+    audit_lines: "{{ audit_lines + [ log_block ] }}"
+  vars:
+    log_block: |
+      [1.7] (Automated - Level 1)
+      Result : {{ cis_1_7_status | default('UNKNOWN') }}
+      ----------------------------------------------------------------
+
+- name: Write audit log (local)
+  delegate_to: localhost
+  copy:
+    dest: "./cis_mysql_audit_manual.log"
+    content: "{{ audit_lines | join('\n') }}"
+
