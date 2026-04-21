@@ -108,16 +108,6 @@
 
 - name: "[1.6] Audit – MYSQL_PWD not set in user profiles"
   block:
-    - name: "1.6 – Tìm file profile cần kiểm tra"
-      ansible.builtin.find:
-        paths: /home
-        patterns:
-          - ".bashrc"
-          - ".profile"
-          - ".bash_profile"
-        file_type: file
-      register: profile_files
-      changed_when: false
 
     - name: "1.6 – Tìm file profile cần kiểm tra"
       ansible.builtin.find:
@@ -134,20 +124,33 @@
       register: profile_files
       changed_when: false
 
+    - name: "1.6 – Kiểm tra MYSQL_PWD trong các file"
+      ansible.builtin.shell: >
+        grep -H MYSQL_PWD {{ item.path }} || true
+      loop: "{{ profile_files.files }}"
+      register: check_1_6
+      changed_when: false
+      when: profile_files.matched > 0
+
     - name: "1.6 – Set CIS status"
       ansible.builtin.set_fact:
         cis_1_6_status: >-
-          {{
-            'FAIL' if (check_1_6.results | selectattr('stdout','!=','') | list | length) > 0
-            else 'PASS'
-          }}
+          {% if profile_files.matched == 0 %}
+          INFO – no profile files
+          {% elif (check_1_6.results | selectattr('stdout','!=','') | list | length) > 0 %}
+          FAIL
+          {% else %}
+          PASS
+          {% endif %}
+
     - name: "1.6 – Ghi kết quả"
       ansible.builtin.set_fact:
         audit_lines: "{{ audit_lines + [ log_block ] }}"
       vars:
         log_block: |
           [1.6] MYSQL_PWD in User Profiles (Automated - Level 1)
-          Result : {{ cis_1_6_status }}
+          Files checked : {{ profile_files.matched | default(0) }}
+          Result        : {{ cis_1_6_status }}
           ----------------------------------------------------------------
     
 - name: "[3.x] Audit – Lấy các biến cấu hình quan trọng từ MySQL"
