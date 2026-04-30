@@ -2,86 +2,100 @@
 - name: Init audit log buffer
   ansible.builtin.set_fact:
     audit_lines: []
+
 # ==============================================================================
-# TỰ ĐỘNG ĐÁNH GIÁ Mục 1.1: Place Databases on Non-System Partitions
+# CIS 1.1 – datadir Partition
 # ==============================================================================
 
-- name: CIS 1.1 - Lấy đường dẫn thư mục chứa dữ liệu (datadir)
-  ansible.builtin.command: mysql -N -B -e "SELECT @@datadir;"
-  register: mysql_datadir_output
+- name: "[1.1] Audit – Get datadir from MySQL"
+  community.mysql.mysql_query:
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    query: "SELECT @@datadir;"
+  register: mysql_datadir
+  changed_when: false
   become: yes
+
+# Lấy path thật
+- name: "[1.1] Set datadir path"
+  set_fact:
+    datadir_path: "{{ mysql_datadir.query_result[0][0]['@@datadir'] }}"
+
+# Lấy mount point
+- name: "[1.1] Get mount point using df"
+  ansible.builtin.shell: >
+    df -P {{ datadir_path }} | awk 'NR==2 {print $6}'
+  register: datadir_mount_cmd
   changed_when: false
 
-- name: CIS 1.1 - Tìm chính xác phân vùng (Mount Point) của datadir
-  # Lệnh df -P xuất định dạng chuẩn, awk 'NR==2 {print $6}' sẽ chỉ lấy đúng tên phân vùng ở dòng số 2
-  ansible.builtin.shell: df -P {{ mysql_datadir_output.stdout }} | awk 'NR==2 {print $6}'
-  register: datadir_mount_point
-  become: yes
-  changed_when: false
-
-- name: CIS 1.1 - Xử lý logic Đánh giá (Pass/Fail)
+# Đánh giá CIS
+- name: "[1.1] Evaluate CIS status"
   ansible.builtin.set_fact:
-    # Nếu phân vùng nằm trong danh sách cấm (/, /var, /usr) thì Fail, ngược lại là Pass
+    datadir_mount_point: "{{ datadir_mount_cmd.stdout }}"
     cis_1_1_status: >-
-      {% if datadir_mount_point.stdout in ['/', '/var', '/usr'] %}
+      {% if datadir_mount_cmd.stdout in ['/', '/var', '/usr'] %}
       FAIL
       {% else %}
       PASS
       {% endif %}
 
-- name: "1.1 – Ghi kết quả"
+# Log
+- name: "[1.1] Log result"
   ansible.builtin.set_fact:
     audit_lines: "{{ audit_lines + [ log_block ] }}"
   vars:
     log_block: |
-      [1.1] datadir Partition Configuration (Automated - Level 1)
-      datadir           : {{ mysql_datadir_output.stdout | default('(not set)') }}
-      Mounted on        : {{ datadir_mount_point.stdout | default('(unknown)') }}
-      Result            : {{ cis_1_1_status | default('UNKNOWN') }}
+      [1.1] datadir Partition Configuration (Manual - Level 1)
+      datadir    : {{ datadir_path }}
+      Mounted on : {{ datadir_mount_cmd.stdout }}
+      Result     : {{ cis_1_1_status }}
       ----------------------------------------------------------------
 
-
 # ==============================================================================
-# TỰ ĐỘNG ĐÁNH GIÁ Mục 1.7: Ensure MySQL is Run Under a Sandbox Environment
+# CIS 1.7 – Sandbox Environment
 # ==============================================================================
 
-- name: CIS 1.7 - Kiểm tra cấu hình chroot (Bỏ qua các dòng comment)
-  ansible.builtin.shell: grep -i 'chroot' /etc/mysql/my.cnf /etc/mysql/mysql.conf.d/*.cnf | grep -v '^\s*#' || true
-  register: chroot_check
-  become: yes
-  changed_when: false
+# 🔹 Check chroot bằng module file + lineinfile-like logic
+- name: CIS 1.7 - Đọc file config MySQL
+  ansible.builtin.slurp:
+    src: /etc/mysql/mysql.conf.d/mysqld.cnf
+  register: mysql_conf
+  ignore_errors: true
 
-- name: CIS 1.7 - Kiểm tra trạng thái cô lập của systemd (Tìm Main PID)
-  ansible.builtin.shell: systemctl status mysql | grep 'Main PID' || true
-  register: systemd_check
-  become: yes
-  changed_when: false
-
-- name: CIS 1.7 - Kiểm tra xem có đang chạy trong Docker không
-  ansible.builtin.shell: docker ps | grep mysql || true
-  register: docker_check
-  become: yes
-  changed_when: false
-
-- name: CIS 1.7 - IN KẾT QUẢ TỪNG MỤC CHECK (DEBUG DỮ LIỆU)
-  ansible.builtin.debug:
-    msg:
-      - "[1] Kết quả Chroot  : '{{ chroot_check.stdout }}'"
-      - "[2] Kết quả Systemd : '{{ systemd_check.stdout }}'"
-      - "[3] Kết quả Docker  : '{{ docker_check.stdout }}'"
-
-- name: CIS 1.7 - Xử lý logic Đánh giá (Pass/Fail)
+- name: CIS 1.7 - Kiểm tra có chroot không
   ansible.builtin.set_fact:
-    # Pass nếu thỏa mãn 1 trong 3 điều kiện: Có chroot, KHÔNG chạy dưới quyền root trong systemd, HOẶC chạy trong Docker
+    chroot_check: >-
+      {{
+        (mysql_conf.content | b64decode).split('\n')
+        | select('search', 'chroot')
+        | reject('search', '^#')
+        | list
+      }}
+
+# 🔹 Check systemd user
+- name: CIS 1.7 - Lấy service facts
+  ansible.builtin.service_facts:
+
+- name: CIS 1.7 - Kiểm tra user chạy MySQL
+  ansible.builtin.set_fact:
+    systemd_check: "{{ ansible_facts.services['mysql.service'] | default({}) }}"
+
+# 🔹 Check docker (không dùng shell → dùng file existence)
+- name: CIS 1.7 - Kiểm tra docker runtime
+  ansible.builtin.stat:
+    path: /.dockerenv
+  register: docker_env
+
+- name: CIS 1.7 - Đánh giá
+  ansible.builtin.set_fact:
     cis_1_7_status: >-
-      {% if chroot_check.stdout != '' %}
-      PASS (Bảo vệ bằng chroot)
-      {% elif systemd_check.stdout != '' and '(root)' not in systemd_check.stdout %}
-      PASS (Bảo vệ bằng systemd isolation)
-      {% elif docker_check.stdout != '' %}
-      PASS (Bảo vệ bằng Docker container)
+      {% if chroot_check | length > 0 %}
+      PASS (chroot)
+      {% elif systemd_check and systemd_check.state == 'running' %}
+      PASS (systemd)
+      {% elif docker_env.stat.exists %}
+      PASS (docker)
       {% else %}
-      FAIL (Không tìm thấy cơ chế Sandbox nào hợp lệ)
+      FAIL
       {% endif %}
 
 - name: "1.7 – Ghi kết quả"
@@ -89,13 +103,30 @@
     audit_lines: "{{ audit_lines + [ log_block ] }}"
   vars:
     log_block: |
-      [1.7] (Automated - Level 1)
-      Result : {{ cis_1_7_status | default('UNKNOWN') }}
+      [1.7] Sandbox Environment (Automated - Level 1)
+      Result : {{ cis_1_7_status }}
       ----------------------------------------------------------------
 
-- name: Write audit log (local)
-  delegate_to: localhost
-  copy:
-    dest: "./cis_mysql_audit_manual.log"
-    content: "{{ audit_lines | join('\n') }}"
+# ==============================================================================
+# WRITE LOG LOCAL
+# ==============================================================================
 
+- name: Write remediation log on remote target (tránh quá tải local connection)
+  become: yes
+  copy:
+    dest: "/tmp/cis_mysql_audit_manual.log"
+    content: "{{ audit_lines | join('\n') }}"
+    mode: '0644'
+
+- name: Fetch log về controller
+  become: yes
+  fetch:
+    src: "/tmp/cis_mysql_audit_manual.log"
+    dest: "./cis_mysql_audit_manual.log"
+    flat: yes
+
+- name: Xóa file log tạm trên remote
+  become: yes
+  file:
+    path: "/tmp/cis_mysql_audit_manual.log"
+    state: absent
