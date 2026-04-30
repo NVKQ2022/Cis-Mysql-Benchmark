@@ -1,0 +1,593 @@
+- name: Init remediation log buffer
+  ansible.builtin.set_fact:
+    remediation_lines: []
+
+- name: "[1.2] Remediation – Ensure MySQL runs under dedicated 'mysql' user"
+  become: yes
+  block:
+    - name: "1.2 – Đảm bảo group mysql tồn tại"
+      ansible.builtin.group:
+        name: mysql
+        state: present
+        system: true
+
+    - name: "1.2 – Đảm bảo user mysql tồn tại với shell /bin/false"
+      ansible.builtin.user:
+        name: mysql
+        group: mysql
+        home: /var/lib/mysql
+        comment: "MySQL Server"
+        shell: /bin/false
+        create_home: false
+        system: true
+        state: present
+
+    - name: "1.2 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [1.2] REMEDIATION – MySQL chạy bằng user mysql
+          Action : Đảm bảo mysqld chạy dưới user mysql
+          Result : {{ cis_1_2_status | default('DONE') }}
+          ----------------------------------------------------------------
+  when: cis_1_2_status is defined and 'FAIL' in cis_1_2_status
+
+- name: "[1.3] Remediation – Disable MySQL Command History"
+  become: yes
+  block:
+    - name: "1.3 – Tìm tất cả file .mysql_history"
+      ansible.builtin.find:
+        paths:
+          - /root
+          - /home
+        patterns: ".mysql_history"
+        recurse: yes
+        hidden: yes
+      register: history_files
+      changed_when: false
+
+    - name: "1.3 – Xóa các file .mysql_history cũ"
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ history_files.files }}"
+      when: history_files.matched > 0
+
+    - name: "1.3 – Tạo symlink /root/.mysql_history -> /dev/null"
+      ansible.builtin.file:
+        src: /dev/null
+        dest: /root/.mysql_history
+        state: link
+        force: yes
+
+    - name: "1.3 – Lấy danh sách user trong /home"
+      ansible.builtin.find:
+        paths: /home
+        file_type: directory
+        depth: 1
+      register: home_users
+      changed_when: false
+
+    - name: "1.3 – Tạo symlink .mysql_history"
+      ansible.builtin.file:
+        src: /dev/null
+        dest: "{{ item.path }}/.mysql_history"
+        state: link
+        force: yes
+      loop: "{{ home_users.files }}"
+    - name: "1.3 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [1.3] REMEDIATION – Xóa .mysql_history
+          Action : Xóa file history nếu tồn tại
+          Result : {{ cis_1_3_status | default('DONE') }}
+          ----------------------------------------------------------------
+  when: cis_1_3_status is defined and 'FAIL' in cis_1_3_status
+
+- name: "[1.4] Remediation – Unset MYSQL_PWD from environment"
+  become: yes
+  block:
+    - name: "1.4 – Xóa biến MYSQL_PWD trong /etc/environment nếu có"
+      ansible.builtin.lineinfile:
+        path: /etc/environment
+        regexp: '^\s*MYSQL_PWD\s*='
+        state: absent
+      failed_when: false
+
+    - name: "1.4 – Xóa biến MYSQL_PWD trong /etc/profile nếu có"
+      ansible.builtin.lineinfile:
+        path: /etc/profile
+        regexp: '^\s*MYSQL_PWD\s*='
+        state: absent
+      failed_when: false
+
+    - name: "1.4 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [1.4] REMEDIATION – MYSQL_PWD
+          Action : Remove MYSQL_PWD khỏi môi trường
+          Result : {{ cis_1_4_status | default('DONE') }}
+          ----------------------------------------------------------------
+  when: cis_1_4_status is defined and 'FAIL' in cis_1_4_status
+
+- name: "[1.5] Remediation – Disable interactive login for mysql user"
+  become: yes
+  block:
+    - name: "1.5 – Đặt shell của user mysql thành /sbin/nologin"
+      ansible.builtin.user:
+        name: mysql
+        shell: /sbin/nologin
+      when: "'mysql' in lookup('ansible.builtin.passwd', errors='ignore')"
+      
+    - name: "1.5 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [1.5] REMEDIATION – Disable interactive login
+          Action : Set shell = /usr/sbin/nologin
+          Result : {{ cis_1_5_status | default('DONE') }}
+          ----------------------------------------------------------------
+  when: cis_1_5_status is defined and 'FAIL' in cis_1_5_status
+
+- name: "[1.6] Remediation – Remove MYSQL_PWD from User Profile Files"
+  become: yes
+  block:
+
+    - name: "1.6 – Tìm file profile cần xử lý"
+      ansible.builtin.find:
+        paths:
+          - /home
+          - /root
+        patterns:
+          - ".bashrc"
+          - ".profile"
+          - ".bash_profile"
+        file_type: file
+        hidden: yes
+        recurse: yes
+      register: profile_files
+
+    - name: "1.6 – Xóa dòng chứa MYSQL_PWD"
+      ansible.builtin.lineinfile:
+        path: "{{ item.path }}"
+        regexp: ".*MYSQL_PWD.*"
+        state: absent
+        backrefs: no
+      loop: "{{ profile_files.files }}"
+      register: fix_1_6_results
+      when: profile_files.matched > 0
+
+    - name: "1.6 – Xác định trạng thái remediation"
+      ansible.builtin.set_fact:
+        remediation_1_6_status: >-
+          {{
+            'CHANGED'
+            if (fix_1_6_results.results | selectattr('changed','equalto',true) | list | length) > 0
+            else 'OK – no change needed'
+          }}
+
+    - name: "1.6 – Ghi kết quả remediation"
+      ansible.builtin.set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [1.6] REMEDIATION – MYSQL_PWD in profiles
+          Files scanned : {{ profile_files.matched | default(0) }}
+          Result        : {{ remediation_1_6_status }}
+          ----------------------------------------------------------------
+  when: cis_1_6_status is defined and 'FAIL' in cis_1_6_status
+
+- name: "[3.x] Get MySQL variables"
+  become: yes
+  community.mysql.mysql_query:
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    query: |
+      SHOW VARIABLES WHERE Variable_name IN (
+        'datadir',
+        'log_error',
+        'relay_log_basename',
+        'log_bin_basename',
+        'pid_file',
+        'socket',
+        'slow_query_log',
+        'slow_query_log_file',
+        'general_log',
+        'general_log_file',
+        'plugin_dir',
+        'log_raw'
+      );
+  register: mysql_vars_raw
+  changed_when: false
+
+- name: Convert MySQL variables
+  set_fact:
+    mysql_vars: >-
+      {{
+        dict(
+          mysql_vars_raw.query_result[0]
+          | map(attribute='Variable_name')
+          | zip(mysql_vars_raw.query_result[0] | map(attribute='Value'))
+        )
+      }}
+
+# 3.1
+- name: "[3.1] Remediation – datadir permissions"
+  become: yes
+  block:
+    - name: Set permission 0750 mysql:mysql
+      ansible.builtin.file:
+        path: "{{ mysql_vars['datadir'] }}"
+        owner: mysql
+        group: mysql
+        mode: "0750"
+        state: directory
+
+    - set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [3.1] REMEDIATION – datadir
+          Path   : {{ mysql_vars['datadir'] }}
+          Result : DONE
+          ----------------------------------------------------------------
+  when: cis_3_1_status is defined and 'FAIL' in cis_3_1_status
+
+- name: "[3.2] Remediation – binary log"
+  become: yes
+  block:
+    - name: Find binlog files
+      ansible.builtin.find:
+        paths: "{{ mysql_vars['log_bin_basename'] | dirname }}"
+        patterns: "{{ mysql_vars['log_bin_basename'] | basename }}*"
+      register: bin_logs
+      changed_when: false
+
+    - name: Fix permission tất cả binlog
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        owner: mysql
+        group: mysql
+        mode: "0660"
+      loop: "{{ bin_logs.files | default([]) }}"
+      
+    - name: Create override directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/mysql.service.d
+        state: directory
+        mode: "0755"
+
+    - name: Set Environment UMASK=0660
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/mysql.service.d/override.conf
+        content: |
+          [Service]
+          Environment="UMASK=0660"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Reload systemd
+      ansible.builtin.command: systemctl daemon-reload
+      
+    - name: Ghi log
+      ansible.builtin.set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [3.2] REMEDIATION – binlog
+          Action : chmod 0660 mysql:mysql
+          Result : DONE
+          ----------------------------------------------------------------
+  when: cis_3_2_status is defined and 'FAIL' in cis_3_2_status
+# 3.3
+- name: "[3.3] Remediation – log_error"
+  become: yes
+  block:
+
+    - name: Resolve log_error path
+      set_fact:
+        log_error_path: >-
+          {{
+            mysql_vars['log_error']
+            if (mysql_vars['log_error'] | default('')).startswith('/')
+            else (mysql_vars['datadir'] ~ '/' ~ mysql_vars['log_error'])
+          }}
+
+    - name: Fix permission
+      file:
+        path: "{{ log_error_path }}"
+        owner: mysql
+        group: mysql
+        mode: "0600"
+      failed_when: false
+
+    - set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [3.3] REMEDIATION – log_error
+          File   : {{ log_error_path }}
+          Result : DONE
+          ----------------------------------------------------------------
+
+
+# 3.4
+- name: "[3.4] Remediation – slow_query_log"
+  become: yes
+  block:
+    - name: Fix slow log permission
+      file:
+        path: "{{ mysql_vars['slow_query_log_file'] }}"
+        owner: mysql
+        group: mysql
+        mode: "0660"
+      when:
+        - mysql_vars['slow_query_log'] | default('OFF') | upper not in ['OFF','0']
+        - mysql_vars['slow_query_log_file'] | default('') != ''
+
+    - set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [3.4] REMEDIATION – slow_query_log
+          File   : {{ mysql_vars['slow_query_log_file'] | default('(not set)') }}
+          Result : DONE
+          ----------------------------------------------------------------
+  when: cis_3_4_status is defined and 'FAIL' in cis_3_4_status
+
+
+# 3.5
+- name: "[3.5] Remediation – relay_log"
+  become: yes
+  block:
+    - name: Find relay logs
+      find:
+        paths: "{{ mysql_vars['relay_log_basename'] | dirname }}"
+        patterns: "{{ mysql_vars['relay_log_basename'] | basename }}*"
+      register: relay_logs
+
+    - name: Fix permission
+      file:
+        path: "{{ item.path }}"
+        owner: mysql
+        group: mysql
+        mode: "0660"
+      loop: "{{ relay_logs.files | default([]) }}"
+
+    - set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [3.5] REMEDIATION – relay_log
+          Path   : {{ mysql_vars['relay_log_basename'] | default('(not set)') }}
+          Result : DONE
+          ----------------------------------------------------------------
+  when: cis_3_5_status is defined and 'FAIL' in cis_3_5_status
+
+
+# 3.6
+- name: "[3.6] Remediation – general_log"
+  become: yes
+  block:
+    - name: Fix general log
+      file:
+        path: "{{ mysql_vars['general_log_file'] }}"
+        owner: mysql
+        group: mysql
+        mode: "0660"
+      when:
+        - mysql_vars['general_log'] | default('OFF') | upper not in ['OFF','0']
+        - mysql_vars['general_log_file'] | default('') != ''
+
+    - set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [3.6] REMEDIATION – general_log
+          File   : {{ mysql_vars['general_log_file'] | default('(not set)') }}
+          Result : DONE
+          ----------------------------------------------------------------
+  when: cis_3_6_status is defined and 'FAIL' in cis_3_6_status
+
+
+# 3.7
+- name: "[3.7] Remediation – SSL files"
+  become: yes
+  block:
+    - name: Find SSL files
+      find:
+        paths: "{{ mysql_vars['datadir'] }}"
+        patterns: "*.pem"
+        recurse: yes
+      register: ssl_files
+
+    - name: Fix permission
+      file:
+        path: "{{ item.path }}"
+        owner: mysql
+        group: mysql
+        mode: "0400"
+      loop: "{{ ssl_files.files | default([]) }}"
+
+    - set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [3.7] REMEDIATION – SSL files
+          Result : DONE
+          ----------------------------------------------------------------
+  when: cis_3_7_status is defined and 'FAIL' in cis_3_7_status
+
+
+# 3.8
+- name: "[3.8] Remediation – plugin_dir"
+  become: yes
+  block:
+    - name: Fix plugin_dir permission
+      file:
+        path: "{{ mysql_vars['plugin_dir'] }}"
+        owner: mysql
+        group: mysql
+        mode: "0550"
+        state: directory
+
+    - set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [3.8] REMEDIATION – plugin_dir
+          Path   : {{ mysql_vars['plugin_dir'] }}
+          Result : DONE
+          ----------------------------------------------------------------
+  when: cis_3_8_status is defined and 'FAIL' in cis_3_8_status
+
+
+- name: "[6.1] Remediation – Configure log_error to a file path"
+  become: yes
+  block:
+    - name: "6.1 – Đảm bảo thư mục /var/log/mysql tồn tại với owner mysql"
+      ansible.builtin.file:
+        path: /var/log/mysql
+        state: directory
+        owner: mysql
+        group: mysql
+        mode: "0750"
+        
+    - name: "6.1 – Thêm (hoặc sửa) cài đặt log_error trong config"
+      ansible.builtin.lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^\s*log_error\s*='
+        line: "log_error = /var/log/mysql/error.log"
+        insertafter: '^\[mysqld\]'
+        backup: yes
+        
+    - name: "6.1 – Đảm bảo file /var/log/mysql/error.log tồn tại"
+      ansible.builtin.file:
+        path: /var/log/mysql/error.log
+        state: touch
+        owner: mysql
+        group: mysql
+        mode: "0640"
+        
+    - name: "6.1 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [6.1] REMEDIATION – log_error
+          Action : Configure error log path
+          Path   : {{ log_error_path | default('(not set)') }}
+          Result : {{ cis_6_1_status | default('DONE') }}
+          ----------------------------------------------------------------
+  when: cis_6_1_status is defined and 'FAIL' in cis_6_1_status
+
+- name: "[6.2] Remediation – Move Logs to Non-System Partition"
+  become: yes
+  block:
+    - name: "6.2 – Tạo thư mục log mới"
+      ansible.builtin.file:
+        path: /mnt/mysql-logs
+        state: directory
+        owner: mysql
+        group: mysql
+        mode: "0750"
+
+    - name: "6.2 – Cấu hình lại log_error"
+      ansible.builtin.lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^\s*log_error\s*='
+        line: "log_error = /mnt/mysql-logs/error.log"
+        insertafter: '^\[mysqld\]'
+        backup: yes
+
+    - name: "6.2 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [6.2] REMEDIATION – log partition
+          Action : Move logs to dedicated partition
+          Result : {{ cis_6_2_status | default('DONE') }}
+          ----------------------------------------------------------------
+  when: cis_6_2_status is defined and 'FAIL' in cis_6_2_status
+
+- name: "[6.3] Remediation – Set log_error_verbosity = 2"
+  become: yes
+  block:
+    - name: "6.3 – Thêm/sửa log_error_verbosity trong config"
+      ansible.builtin.lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^\s*log_error_verbosity\s*='
+        line: "log_error_verbosity = 2"
+        insertafter: '^\[mysqld\]'
+        backup: yes
+        
+    - name: "6.3 – Đặt biến log_error_verbosity=2 (không cần restart)"
+      community.mysql.mysql_variables:
+        login_host: "{{ mysql_host }}"
+        login_user: root
+        login_password: "{{ mysql_root_password }}"
+        variable: log_error_verbosity
+        value: "2"
+      no_log: true
+      failed_when: false
+      
+    - name: "6.3 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [6.3] REMEDIATION – log_error_verbosity
+          Action : Set log_error_verbosity = 2
+          Result : {{ cis_6_3_status | default('DONE') }}
+          ----------------------------------------------------------------
+  when: cis_6_3_status is defined and 'FAIL' in cis_6_3_status
+
+- name: "[6.4] Remediation – Set log-raw = OFF"
+  become: yes
+  block:
+    - name: "6.4 – Thêm/sửa log-raw trong config"
+      ansible.builtin.lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^\s*log-raw\s*='
+        line: "log-raw = OFF"
+        insertafter: '^\[mysqld\]'
+        backup: yes
+        
+    - name: "6.4 – Ghi log"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [6.4] REMEDIATION: log-raw = OFF
+          Action: Cấu hình log-raw = OFF trong config
+          Status: DONE
+          ----------------------------------------------------------------
+  when: cis_6_4_status is defined and 'FAIL' in cis_6_4_status
+
+- name: Write remediation log on remote target (tránh quá tải local connection)
+  become: yes
+  copy:
+    dest: "/tmp/cis_mysql_remediation.log"
+    content: "{{ remediation_lines | join('\n') }}"
+    mode: '0644'
+
+- name: Fetch log về controller
+  become: yes
+  fetch:
+    src: "/tmp/cis_mysql_remediation.log"
+    dest: "./cis_mysql_remediation.log"
+    flat: yes
+
+- name: Xóa file log tạm trên remote
+  become: yes
+  file:
+    path: "/tmp/cis_mysql_remediation.log"
+    state: absent
+
