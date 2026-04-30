@@ -6,7 +6,7 @@ OUTPUT_DIR="$SCRIPT_DIR/sections"
 mkdir -p "$OUTPUT_DIR"
 
 declare -A SECTIONS=(
-    ["1"]="Operating_System_Level_Configuration"
+    ["1"]="System_and_File_Security"
     ["2"]="Installation_and_Planning"
     ["3"]="File_Permissions"
     ["4"]="General_Security"
