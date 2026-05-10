@@ -1,0 +1,147 @@
+# ==============================================================================
+# CIS 10.1 - Ensure All Group Replication Traffic is Secured (Manual)
+# ==============================================================================
+#
+# Mục tiêu:
+# Đảm bảo MySQL Group Replication traffic được mã hóa bằng SSL/TLS.
+#
+# CIS yêu cầu:
+# group_replication_ssl_mode KHÔNG được là DISABLED.
+#
+# Giá trị hợp lệ:
+# - REQUIRED
+# - VERIFY_CA
+# - VERIFY_IDENTITY
+#
+# Giá trị không an toàn:
+# - DISABLED
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# STEP 1 - Kiểm tra MySQL Group Replication plugin
+# ------------------------------------------------------------------------------
+
+- name: CIS 10.1 - Check Group Replication plugin
+  ansible.builtin.shell: |
+    mysql -N -B -e "
+    SELECT PLUGIN_STATUS
+    FROM INFORMATION_SCHEMA.PLUGINS
+    WHERE PLUGIN_NAME='group_replication';
+    "
+  register: group_replication_plugin
+  become: yes
+  changed_when: false
+
+# ------------------------------------------------------------------------------
+# STEP 2 - Debug plugin status
+# ------------------------------------------------------------------------------
+
+- name: CIS 10.1 - Debug plugin status
+  ansible.builtin.debug:
+    msg:
+      - "Group Replication Plugin Status: '{{ group_replication_plugin.stdout }}'"
+
+# ------------------------------------------------------------------------------
+# STEP 3 - Kiểm tra group_replication_ssl_mode
+# ------------------------------------------------------------------------------
+
+- name: CIS 10.1 - Get group_replication_ssl_mode
+  ansible.builtin.shell: |
+    mysql -N -B -e "
+    SELECT @@group_replication_ssl_mode;
+    "
+  register: group_replication_ssl_mode
+  become: yes
+  changed_when: false
+  when: group_replication_plugin.stdout == "ACTIVE"
+
+# ------------------------------------------------------------------------------
+# STEP 4 - Debug SSL mode
+# ------------------------------------------------------------------------------
+
+- name: CIS 10.1 - Debug SSL mode
+  ansible.builtin.debug:
+    msg:
+      - "group_replication_ssl_mode = '{{ group_replication_ssl_mode.stdout }}'"
+  when: group_replication_plugin.stdout == "ACTIVE"
+
+# ------------------------------------------------------------------------------
+# STEP 5 - Xử lý logic đánh giá
+# ------------------------------------------------------------------------------
+
+- name: CIS 10.1 - Determine compliance status
+  ansible.builtin.set_fact:
+    cis_10_1_status: >-
+
+      {% if group_replication_plugin.stdout == '' %}
+      NOT APPLICABLE
+      (Group Replication plugin không được cài đặt)
+
+      {% elif group_replication_plugin.stdout != 'ACTIVE' %}
+      FAIL
+      (Group Replication plugin không hoạt động)
+
+      {% elif group_replication_ssl_mode.stdout == 'DISABLED' %}
+      FAIL
+      (SSL/TLS bị DISABLED)
+
+      {% elif group_replication_ssl_mode.stdout in
+              ['REQUIRED', 'VERIFY_CA', 'VERIFY_IDENTITY'] %}
+      PASS
+      (SSL/TLS đã được cấu hình: {{ group_replication_ssl_mode.stdout }})
+
+      {% else %}
+      MANUAL REVIEW REQUIRED
+      {% endif %}
+
+# ------------------------------------------------------------------------------
+# STEP 6 - In kết quả cuối
+# ------------------------------------------------------------------------------
+
+- name: CIS 10.1 - Print final result
+  ansible.builtin.debug:
+    msg:
+      - "======================================================"
+      - " CIS 10.1 - Ensure All Group Replication Traffic"
+      - "            is Secured"
+      - "======================================================"
+      - "Group Replication Plugin : {{ group_replication_plugin.stdout | default('NOT INSTALLED') }}"
+      - "SSL Mode                : {{ group_replication_ssl_mode.stdout | default('N/A') }}"
+      - "------------------------------------------------------"
+      - "FINAL STATUS            : {{ cis_10_1_status }}"
+      - "------------------------------------------------------"
+      - "ACCEPTABLE VALUES:"
+      - "- REQUIRED"
+      - "- VERIFY_CA"
+      - "- VERIFY_IDENTITY"
+      - "------------------------------------------------------"
+      - "UNSAFE VALUE:"
+      - "- DISABLED"
+      - "------------------------------------------------------"
+      - "NOTE:"
+      - "This CIS control is MANUAL because automation"
+      - "cannot fully verify:"
+      - "- TLS certificate trust"
+      - "- Mutual authentication"
+      - "- CA validation"
+      - "- Hostname verification"
+      - "- Secure network architecture"
+      - "======================================================"
+
+# ------------------------------------------------------------------------------
+# STEP 7 - Gợi ý remediation nếu FAIL
+# ------------------------------------------------------------------------------
+
+- name: CIS 10.1 - Remediation suggestion
+  ansible.builtin.debug:
+    msg:
+      - "REMEDIATION:"
+      - "Edit my.cnf and configure:"
+      - "group_replication_ssl_mode=REQUIRED"
+      - ""
+      - "Recommended stronger modes:"
+      - "- VERIFY_CA"
+      - "- VERIFY_IDENTITY"
+  when:
+    - group_replication_plugin.stdout == "ACTIVE"
+    - group_replication_ssl_mode.stdout == "DISABLED"

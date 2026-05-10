@@ -1,0 +1,165 @@
+# ==============================================================================
+# CIS 9.1 - Ensure Replication Traffic is Secured (Manual)
+# ==============================================================================
+#
+# Mục tiêu:
+# Kiểm tra replication traffic giữa MySQL Primary/Replica
+# có được bảo vệ bằng SSL/TLS hay không.
+# Script này sẽ:
+# 1. Kiểm tra server có replication không
+# 2. Lấy replication status
+# 3. Kiểm tra SSL/TLS replication
+# 4. Kiểm tra certificate configuration
+# 5. Đưa ra PASS / MANUAL REVIEW REQUIRED
+#
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# STEP 1 - Lấy replication status
+# Hỗ trợ cả MySQL 8+ và MySQL 5.x
+# ------------------------------------------------------------------------------
+
+- name: CIS 9.1 - Get replication status
+  ansible.builtin.shell: |
+    mysql -e "SHOW REPLICA STATUS\G" 2>/dev/null || \
+    mysql -e "SHOW SLAVE STATUS\G" 2>/dev/null
+  register: replication_status
+  become: yes
+  changed_when: false
+
+# ------------------------------------------------------------------------------
+# STEP 2 - DEBUG raw output
+# ------------------------------------------------------------------------------
+
+- name: CIS 9.1 - Debug replication status output
+  ansible.builtin.debug:
+    var: replication_status.stdout_lines
+
+# ------------------------------------------------------------------------------
+# STEP 3 - Kiểm tra replication có tồn tại không
+# ------------------------------------------------------------------------------
+
+- name: CIS 9.1 - Check replication existence
+  ansible.builtin.set_fact:
+    replication_exists: >-
+      {{
+        'Yes'
+        if replication_status.stdout != ''
+        else 'No'
+      }}
+
+# ------------------------------------------------------------------------------
+# STEP 4 - Kiểm tra SSL replication enabled
+# ------------------------------------------------------------------------------
+
+- name: CIS 9.1 - Check SSL enabled for replication
+  ansible.builtin.set_fact:
+    replication_ssl_enabled: >-
+      {{
+        'Yes'
+        if (
+          'Source_SSL_Allowed: Yes' in replication_status.stdout
+          or
+          'Master_SSL_Allowed: Yes' in replication_status.stdout
+        )
+        else 'No'
+      }}
+
+# ------------------------------------------------------------------------------
+# STEP 5 - Kiểm tra SSL CA file
+# ------------------------------------------------------------------------------
+
+- name: CIS 9.1 - Check SSL CA file
+  ansible.builtin.set_fact:
+    replication_ssl_ca: >-
+      {{
+        'Configured'
+        if (
+          'Source_SSL_CA_File:' in replication_status.stdout
+          or
+          'Master_SSL_CA_File:' in replication_status.stdout
+        )
+        else 'Not Configured'
+      }}
+
+# ------------------------------------------------------------------------------
+# STEP 6 - Kiểm tra SSL certificate file
+# ------------------------------------------------------------------------------
+
+- name: CIS 9.1 - Check SSL certificate file
+  ansible.builtin.set_fact:
+    replication_ssl_cert: >-
+      {{
+        'Configured'
+        if (
+          'Source_SSL_Cert:' in replication_status.stdout
+          or
+          'Master_SSL_Cert:' in replication_status.stdout
+        )
+        else 'Not Configured'
+      }}
+
+# ------------------------------------------------------------------------------
+# STEP 7 - Kiểm tra SSL key file
+# ------------------------------------------------------------------------------
+
+- name: CIS 9.1 - Check SSL key file
+  ansible.builtin.set_fact:
+    replication_ssl_key: >-
+      {{
+        'Configured'
+        if (
+          'Source_SSL_Key:' in replication_status.stdout
+          or
+          'Master_SSL_Key:' in replication_status.stdout
+        )
+        else 'Not Configured'
+      }}
+
+# ------------------------------------------------------------------------------
+# STEP 8 - Xử lý logic đánh giá
+# ------------------------------------------------------------------------------
+
+- name: CIS 9.1 - Determine compliance status
+  ansible.builtin.set_fact:
+    cis_9_1_status: >-
+      {% if replication_exists == 'No' %}
+      NOT APPLICABLE (Server không sử dụng replication)
+
+      {% elif replication_ssl_enabled == 'Yes'
+              and replication_ssl_ca == 'Configured'
+              and replication_ssl_cert == 'Configured'
+              and replication_ssl_key == 'Configured' %}
+      PASS (SSL/TLS replication đã được cấu hình)
+
+      {% else %}
+      MANUAL REVIEW REQUIRED
+      {% endif %}
+
+# ------------------------------------------------------------------------------
+# STEP 9 - In kết quả cuối
+# ------------------------------------------------------------------------------
+
+- name: CIS 9.1 - Print final result
+  ansible.builtin.debug:
+    msg:
+      - "======================================================"
+      - " CIS 9.1 - Ensure Replication Traffic is Secured"
+      - "======================================================"
+      - "Replication Exists : {{ replication_exists }}"
+      - "SSL Enabled       : {{ replication_ssl_enabled }}"
+      - "SSL CA File       : {{ replication_ssl_ca }}"
+      - "SSL Cert File     : {{ replication_ssl_cert }}"
+      - "SSL Key File      : {{ replication_ssl_key }}"
+      - "------------------------------------------------------"
+      - "FINAL STATUS      : {{ cis_9_1_status }}"
+      - "------------------------------------------------------"
+      - "NOTE:"
+      - "This CIS control is MANUAL because automation"
+      - "cannot fully verify:"
+      - "- Private network isolation"
+      - "- VPN security"
+      - "- Mutual authentication"
+      - "- TLS certificate trust"
+      - "- Network architecture"
+      - "======================================================"
