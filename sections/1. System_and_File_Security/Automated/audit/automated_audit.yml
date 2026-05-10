@@ -258,14 +258,13 @@
       ansible.builtin.set_fact:
         bad_bin_logs: >-
           {{
-            (check_3_2.files | default([]))
-            | selectattr('mode','!=','0660')
-            | map(attribute='path') | list
-            +
-            (check_3_2.files | default([]))
-            | selectattr('pw_name','!=','mysql')
-            | map(attribute='path') | list
+             (
+             (check_3_2.files | default([]) | selectattr('mode','!=','0660') | map(attribute='path') | list)
+             + (check_3_2.files | default([]) | selectattr('pw_name','!=','mysql') | map(attribute='path') | list)
+             + (check_3_2.files | default([]) | selectattr('gr_name','!=','mysql') | map(attribute='path') | list)
+             ) | unique | list
           }}
+
 
     - name: "3.2 – Set CIS status"
       ansible.builtin.set_fact:
@@ -308,7 +307,17 @@
     - name: "3.3 – Set CIS status"
       ansible.builtin.set_fact:
         cis_3_3_status: >-
-          {% if not check_3_3.stat.exists %}WARN – file log_error không tồn tại{% elif check_3_3.stat.mode == '0600' and check_3_3.stat.pw_name == 'mysql' and check_3_3.stat.gr_name == 'mysql' %}PASS – 0600, mysql:mysql{% else %}FAIL – hiện tại: {{ check_3_3.stat.mode | default('N/A') }} {{ check_3_3.stat.pw_name | default('N/A') }}:{{ check_3_3.stat.gr_name | default('N/A') }}{% endif %}
+          {% if mysql_vars['log_error'] | default('') == '' %}
+          FAIL - log_error not set
+          {% elif not check_3_3.stat.exists %}
+          FAIL - file log_error không tồn tại
+          {% elif check_3_3.stat.mode == '0600'
+                and check_3_3.stat.pw_name == 'mysql'
+                and check_3_3.stat.gr_name == 'mysql' %}
+              PASS
+          {% else %}
+          FAIL - hiện tại: {{ check_3_3.stat.mode | default('N/A') }} {{ check_3_3.stat.pw_name | default('N/A') }}:{{ check_3_3.stat.gr_name | default('N/A') }}
+          {% endif %}
 
     - name: "3.3 – Ghi kết quả"
       ansible.builtin.set_fact:
@@ -404,19 +413,31 @@
           Result             : {{ cis_3_5_status }}
           ----------------------------------------------------------------
 
-- name: "[3.6] Audit – general_log_file Has Appropriate Permissions (660, mysql:mysql)"
+- name: "[3.6] Audit – general_log_file Has Appropriate Permissions (600, mysql:mysql)"
   block:
-    - name: "3.6 – Lấy thông tin perms của general_log_file"
-      ansible.builtin.stat:
-        path: "{{ mysql_vars['general_log_file'] | default('') }}"
-      register: check_3_6
-      when: mysql_vars['general_log'] | upper not in ['OFF','0']
+    - name: "3.6 - Resolve general_log_file path"
+      ansible.builtin.set_fact:
+        general_log_file_path: "{{ mysql_vars['general_log_file'] if (mysql_vars['general_log_file'] | default('')).startswith('/') else mysql_vars['datadir'] ~ '/' ~ mysql_vars['general_log_file'] }}"
 
-    - name: "3.6 – Set CIS status"
+    - name: "3.6 - Lấy thông tin perms của general_log_file"
+      ansible.builtin.stat:
+        path: "{{ general_log_file_path }}"
+      register: check_3_6
+      when: mysql_vars['general_log_file'] | default('') != ''
+
+    - name: "3.6 - Set CIS status"
       ansible.builtin.set_fact:
         cis_3_6_status: >-
-          {% if mysql_vars['general_log'] | upper in ['OFF','0'] %}PASS – general_log OFF{% elif not check_3_6.stat.exists %}INFO – file chưa tồn tại{% elif check_3_6.stat.mode == '0660' and check_3_6.stat.pw_name == 'mysql' and check_3_6.stat.gr_name == 'mysql' %}PASS – 0660, mysql:mysql{% else %}FAIL – hiện tại: {{ check_3_6.stat.mode | default('N/A') }} {{ check_3_6.stat.pw_name | default('N/A') }}:{{ check_3_6.stat.gr_name | default('N/A') }}{% endif %}
-
+              {% if (mysql_vars['general_log'] | default('OFF') | upper) in ['OFF','0'] %}
+              {% if check_3_6.stat.exists | default(false) %}FAIL - general_log OFF nhưng file cũ còn tồn tại{% else %}PASS{% endif %}
+              {% elif check_3_6.stat.exists
+                    and check_3_6.stat.mode == '0600'
+                    and check_3_6.stat.pw_name == 'mysql'
+                    and check_3_6.stat.gr_name == 'mysql' %}
+               PASS
+              {% else %}
+               FAIL
+              {% endif %}
     - name: "3.6 – Ghi kết quả"
       ansible.builtin.set_fact:
         audit_lines: "{{ audit_lines + [ log_block ] }}"
@@ -426,70 +447,70 @@
           general_log      : {{ mysql_vars['general_log'] | default('(not set)') }}
           general_log_file : {{ mysql_vars['general_log_file'] | default('(not set)') }}
           Result           : {{ cis_3_6_status }}
-          ----------------------------------------------------------------    
 
 - name: "[3.7] Audit – SSL Key Files Have Appropriate Permissions (400, mysql:mysql)"
   block:
+    - name: "3.7 - Query SSL files in use"
+      become: true
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: |
+         SELECT VARIABLE_NAME, VARIABLE_VALUE
+         FROM performance_schema.global_variables
+         WHERE REGEXP_LIKE(VARIABLE_NAME,'^.*ssl_(ca|capath|cert|crl|crlpath|key)$')
+         AND VARIABLE_VALUE <> '';
+      register: ssl_vars_raw
+      changed_when: false
 
-    - name: "3.7 – Lấy danh sách SSL files"
-      ansible.builtin.find:
-        paths: "{{ mysql_vars['datadir'] }}"
-        patterns: ["*.pem"]
-        recurse: yes
+    - name: "3.7 - Build SSL file list"
+      ansible.builtin.set_fact:
+        ssl_files: "{{ ssl_vars_raw.query_result[0] | map(attribute='VARIABLE_VALUE') | list }}"
+
+    - name: "3.7 - Stat SSL files"
+      ansible.builtin.stat:
+        path: "{{ item if item.startswith('/') else mysql_vars['datadir'] ~ '/' ~ item }}"
+      loop: "{{ ssl_files }}"
       register: check_3_7_keys
       changed_when: false
 
-    - name: "3.7 – Build danh sách file và quyền"
+    - name: "3.7 - Init bad SSL files"
       ansible.builtin.set_fact:
-        ssl_file_info: >-
-          {{
-            (check_3_7_keys.files | default([]))
-            | map(attribute='path')
-            | zip(
-                (check_3_7_keys.files | map(attribute='mode') | list),
-                (check_3_7_keys.files | map(attribute='pw_name') | list),
-                (check_3_7_keys.files | map(attribute='gr_name') | list)
-              )
-            | map('list')
-            | list
-          }}
+        bad_ssl_files: []
 
-    - name: "3.7 – Lấy danh sách file sai quyền"
+    - name: "3.7 - Detect bad SSL permissions"
       ansible.builtin.set_fact:
-        bad_ssl_files: >-
-          {{
-            (check_3_7_keys.files | default([]))
-            | selectattr('mode','!=','0400')
-            | map(attribute='path') | list
-            +
-            (check_3_7_keys.files | default([]))
-            | selectattr('pw_name','!=','mysql')
-            | map(attribute='path') | list
-          }}
-
-    - name: "3.7 – Set CIS status"
-      ansible.builtin.set_fact:
-        cis_3_7_status: >-
-          {% if check_3_7_keys.files | length == 0 %}
-          INFO – không sử dụng SSL/TLS
-          {% elif bad_ssl_files | length > 0 %}
-          FAIL
-          {% else %}
-          PASS
-          {% endif %}
-
+        bad_ssl_files: "{{ bad_ssl_files + [item.stat.path | default(item.item)] }}"
+      loop: "{{ check_3_7_keys.results | default([]) }}"
+      when: >
+        not item.stat.exists
+        or item.stat.mode != '0400'
+        or item.stat.pw_name != 'mysql'
+        or item.stat.gr_name != 'mysql'
     - name: "3.7 – Ghi kết quả"
       ansible.builtin.set_fact:
         audit_lines: "{{ audit_lines + [ log_block ] }}"
       vars:
+        cis_3_7_status: "{{ 'PASS' if (bad_ssl_files | length == 0) else 'FAIL' }}"
+
         log_block: |
           [3.7] SSL Key Files Permissions (Automated - Level 1)
+
           Files:
-          {% for f in check_3_7_keys.files %}
-            - {{ f.path }} → {{ f.mode }} {{ f.pw_name }}:{{ f.gr_name }}
+          {% for f in check_3_7_keys.results %}
+            - {{ f.stat.path | default(f.item) }}
+            → {{ f.stat.mode | default('missing') }}
+            {{ f.stat.pw_name | default('unknown') }}:{{ f.stat.gr_name | default('unknown') }}
           {% endfor %}
+
+          Bad Files:
+          {% if bad_ssl_files | length > 0 %}
+          {% for f in bad_ssl_files %}
+            - {{ f }}
+          {% endfor %}
+          {% else %}
+            None
+          {% endif %}
           Result : {{ cis_3_7_status }}
-          ----------------------------------------------------------------
 - name: "[3.8] Audit – Plugin Directory Has Appropriate Permissions (550 or 554, mysql:mysql)"
   block:
     - name: "3.8 – Lấy thông tin perms của plugin_dir"
@@ -516,152 +537,173 @@
           ----------------------------------------------------------------
 # ----------- SECTION 6: Auditing and Logging -----------
 
-- name: "[6.1] Audit – Ensure log_error is configured correctly"
+- name: "[6.1] Audit - Ensure log_error is configured correctly"
   block:
-    - name: "6.1 – Lấy giá trị log_error"
-      ansible.builtin.set_fact:
-        log_error_path: "{{ mysql_vars['log_error'] | default('') }}"
-
-    - name: "6.1 – Chuẩn hóa đường dẫn tuyệt đối"
-      ansible.builtin.set_fact:
-        log_error_full_path: >-
-          {{
-            log_error_path
-            if log_error_path.startswith('/')
-            else mysql_vars['datadir'] ~ '/' ~ log_error_path
-          }}
-      when: log_error_path != ''
-
-    - name: "6.1 – Kiểm tra file tồn tại"
-      ansible.builtin.stat:
-        path: "{{ log_error_full_path }}"
+    - name: "6.1 - Query log_error"
+      become: true
+      community.mysql.mysql_query:
+        login_unix_socket: "{{ mysql_socket | default('/var/run/mysqld/mysqld.sock') }}"
+        query: "SHOW variables LIKE 'log_error';"
       register: check_6_1
-      when: log_error_path != ''
+      changed_when: false
+      failed_when: false
 
-    - name: "6.1 – Set CIS status"
+    - name: "6.1 - Set audit values"
+      ansible.builtin.set_fact:
+        log_error_path: "{{ check_6_1.query_result[0][0]['Value'] | default('') | string | trim }}"
+
+    - name: "6.1 - Set CIS status"
       ansible.builtin.set_fact:
         cis_6_1_status: >-
           {{
-            'FAIL' if log_error_path == ''
-            else (
-              'PASS' if check_6_1.stat.exists
-              else 'FAIL'
+            'PASS'
+            if (
+              log_error_path | length > 0
+              and (log_error_path | lower) not in ['./stderr.err', 'stderr']
+              and not log_error_path.endswith('/')
             )
+            else 'FAIL'
           }}
 
-    - name: "6.1 – Ghi kết quả"
+    - name: "6.1 - Ghi kết quả"
       ansible.builtin.set_fact:
-        audit_lines: "{{ audit_lines + [ log_block ] }}"
+        audit_lines: "{{ audit_lines + [log_block] }}"
       vars:
         log_block: |
           [6.1] log_error Configuration (Automated)
-          log_error : {{ log_error_path | default('(not set)') }}
-          File      : {{ log_error_full_path | default('(none)') }}
-          Result    : {{ cis_6_1_status }}
+          Current : {{ log_error_path | default('(not set)', true) }}
+          Result  : {{ cis_6_1_status }}
           ----------------------------------------------------------------
 
-- name: "[6.2] Audit – Log Files Stored on Non-System Partition"
+- name: "[6.2] Audit - Log Files Stored on Non-System Partition"
   block:
-    - name: "6.2 – Lấy đường dẫn log_error"
-      ansible.builtin.set_fact:
-        log_error_path: >-
-          {{
-            mysql_vars['log_error']
-            if mysql_vars['log_error'].startswith('/')
-            else mysql_vars['datadir'] ~ '/' ~ mysql_vars['log_error']
-          }}
-
-    - name: "6.2 – Kiểm tra partition của log_error"
-      ansible.builtin.command: "df -P {{ log_error_path }} | tail -1 | awk '{print $6}'"
+    - name: "6.2 - Query log_bin_basename"
+      become: true
+      community.mysql.mysql_query:
+        login_unix_socket: "{{ mysql_socket | default('/var/run/mysqld/mysqld.sock') }}"
+        query: "SELECT @@global.log_bin_basename;"
       register: check_6_2
       changed_when: false
       failed_when: false
 
-    - name: "6.2 – Set CIS status"
+    - name: "6.2 - Set audit values"
+      ansible.builtin.set_fact:
+        log_bin_basename: "{{ check_6_2.query_result[0][0]['@@global.log_bin_basename'] | default('') | string | trim }}"
+
+    - name: "6.2 - Set log directory"
+      ansible.builtin.set_fact:
+        log_bin_dir: "{{ log_bin_basename | dirname }}"
+
+    - name: "6.2 - Set CIS status"
       ansible.builtin.set_fact:
         cis_6_2_status: >-
           {{
-            'FAIL' if check_6_2.stdout in ['/', '/var', '/usr']
+            'FAIL'
+            if (
+              log_bin_basename | length == 0
+              or log_bin_dir == '/'
+              or log_bin_dir == '/var'
+              or log_bin_dir is match('^/var/')
+              or log_bin_dir == '/usr'
+              or log_bin_dir is match('^/usr/')
+            )
             else 'PASS'
           }}
 
-    - name: "6.2 – Ghi kết quả"
+    - name: "6.2 - Ghi kết quả"
       ansible.builtin.set_fact:
-        audit_lines: "{{ audit_lines + [ log_block ] }}"
+        audit_lines: "{{ audit_lines + [log_block] }}"
       vars:
         log_block: |
-          [6.2] Log Files Partition
-          Mounted : {{ check_6_2.stdout }}
+          [6.2] Binary Log File Location
+          Current : {{ log_bin_basename | default('(not set)', true) }}
+          Directory: {{ log_bin_dir | default('(none)', true) }}
           Result  : {{ cis_6_2_status }}
           ----------------------------------------------------------------
 
-- name: "[6.3] Audit – log_error_verbosity Set to '2'"
+- name: "[6.3] Audit - log_error_verbosity Set to '2'"
   block:
-    - name: "6.3 – Truy vấn giá trị log_error_verbosity"
-      become: yes
+    - name: "6.3 - Query log_error_verbosity"
+      become: true
       community.mysql.mysql_query:
-        login_unix_socket: /var/run/mysqld/mysqld.sock
-        query: "SHOW VARIABLES LIKE 'log_error_verbosity';"
+        login_unix_socket: "{{ mysql_socket | default('/var/run/mysqld/mysqld.sock') }}"
+        query: "SHOW GLOBAL VARIABLES LIKE 'log_error_verbosity';"
       register: check_6_3
-    - name: "6.3 – Thiết lập trạng thái CIS"
-      ansible.builtin.set_fact:
-        verbosity_val: "{{ check_6_3.query_result[0][0]['Value'] | default('0') }}"
-        cis_6_3_status: >-
-          {% if check_6_3.query_result[0][0]['Value'] | int == 2 %}
-          PASS
-          {% else %}FAIL (Giá trị hiện tại là {{ check_6_3.query_result[0][0]['Value'] }}, yêu cầu là 2
-          {% endif %}
+      changed_when: false
+      failed_when: false
 
-    - name: "6.3 – Ghi kết quả"
+    - name: "6.3 - Set CIS status"
       ansible.builtin.set_fact:
-        audit_lines: "{{ audit_lines + [ log_block ] }}"
+        verbosity_val: "{{ check_6_3.query_result[0][0]['Value'] | default('') | string | trim }}"
+        cis_6_3_status: "{{ 'PASS' if (check_6_3.query_result[0][0]['Value'] | default('') | string | trim) == '2' else 'FAIL' }}"
+
+    - name: "6.3 - Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [log_block] }}"
       vars:
         log_block: |
           [6.3] log_error_verbosity (Automated)
-          Current : {{ verbosity_val }}
+          Current : {{ verbosity_val | default('(not set)', true) }}
+          Expected: 2
           Result  : {{ cis_6_3_status }}
           ----------------------------------------------------------------
-    
-- name: "[6.4] Audit – Ensure log_raw is set to OFF"
-  block:
 
-    - name: "6.4 – Set CIS status"
+- name: "[6.4] Audit - Ensure log-raw is set to OFF"
+  block:
+    - name: "6.4 - Read my.cnf"
+      become: true
+      ansible.builtin.slurp:
+        src: "{{ mysql_cnf_path | default('/etc/my.cnf') }}"
+      register: check_6_4
+      changed_when: false
+      failed_when: false
+
+    - name: "6.4 - Extract active log-raw entries"
       ansible.builtin.set_fact:
-        cis_6_4_status: >-
+        log_raw_values: >-
           {{
-            'PASS'
-            if (mysql_vars['log_raw'] | default('OFF') | lower) == 'off'
-            else 'FAIL'
+            (check_6_4.content | default('') | b64decode)
+            | regex_findall('(?im)^\\s*log-raw\\s*=\\s*([^\\s#;]+)')
           }}
 
-    - name: "6.4 – Ghi kết quả"
+    - name: "6.4 - Set current value"
       ansible.builtin.set_fact:
-        audit_lines: "{{ audit_lines + [ log_block ] }}"
+        log_raw_current: "{{ log_raw_values | last | default('') | string | trim }}"
+
+    - name: "6.4 - Set CIS status"
+      ansible.builtin.set_fact:
+        cis_6_4_status: "{{ 'PASS' if (log_raw_current | lower) == 'off' else 'FAIL' }}"
+
+    - name: "6.4 - Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [log_block] }}"
       vars:
         log_block: |
-          [6.4] log_raw Configuration (Automated)
-          Current : {{ mysql_vars['log_raw'] | default('(not set)') }}
+          [6.4] log-raw Configuration (Automated)
+          Config  : {{ mysql_cnf_path | default('/etc/my.cnf') }}
+          Current : {{ log_raw_current | default('(not set)', true) }}
           Result  : {{ cis_6_4_status }}
           ----------------------------------------------------------------
+
 
 # ================= WRITE LOG =================
 
 - name: Write audit log on remote target (tránh quá tải local connection)
   become: yes
   copy:
-    dest: "/tmp/cis_mysql_audit.log"
+    dest: "/tmp/cis_mysql_audit_automated.log"
     content: "{{ audit_lines | join('\n') }}"
     mode: '0644'
 
 - name: Fetch log về controller
   become: yes
   fetch:
-    src: "/tmp/cis_mysql_audit.log"
-    dest: "./cis_mysql_audit.log"
+    src: "/tmp/cis_mysql_audit_automated.log"
+    dest: "./cis_mysql_audit_automated.log"
     flat: yes
 
 - name: Xóa file log tạm trên remote
   become: yes
   file:
-    path: "/tmp/cis_mysql_audit.log"
+    path: "/tmp/cis_mysql_audit_automated.log"
     state: absent
