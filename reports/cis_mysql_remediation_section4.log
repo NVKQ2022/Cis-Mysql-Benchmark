@@ -1,0 +1,4 @@
+[4.8] REMEDIATION – sql_mode STRICT_ALL_TABLES
+Action : Set sql_mode with STRICT_ALL_TABLES
+Result : APPLIED
+-----------------------------------------------------------------

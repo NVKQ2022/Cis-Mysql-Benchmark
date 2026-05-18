@@ -1,0 +1,34 @@
+[3.1] REMEDIATION – datadir
+Path   : /var/lib/mysql/
+Result : DONE
+----------------------------------------------------------------
+
+[3.2] REMEDIATION – binlog
+Action : chmod 0660 mysql:mysql
+Result : DONE
+----------------------------------------------------------------
+
+[3.3] REMEDIATION – log_error
+File   : /var/log/mysql/error.log
+Result : DONE
+----------------------------------------------------------------
+
+[3.7] REMEDIATION – SSL files
+Result : DONE
+----------------------------------------------------------------
+
+[3.8] REMEDIATION – plugin_dir
+Path   : /usr/lib/mysql/plugin/
+Result : DONE
+----------------------------------------------------------------
+
+[6.2] REMEDIATION – log partition
+Action : Move logs to dedicated partition
+Path   : /mnt/mysql-logs/error.log
+Result : FAIL
+----------------------------------------------------------------
+
+[6.4] REMEDIATION: log-raw = OFF
+Action: Cấu hình log-raw = OFF trong config
+Status: DONE
+----------------------------------------------------------------

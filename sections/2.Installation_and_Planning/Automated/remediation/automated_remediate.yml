@@ -1,0 +1,383 @@
+---
+- name: Init remediation log buffer
+  ansible.builtin.set_fact:
+    remediation_lines: []
+
+- name: "[2.1.4] Remediation – Enable Binary Log for Point-in-Time Recovery"
+  become: yes
+  block:
+    - name: "2.1.4 – Enable log_bin in config"
+      ansible.builtin.lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^\s*log_bin\s*='
+        line: "log_bin = /var/log/mysql/mysql-bin.log"
+        insertafter: '^\[mysqld\]'
+        backup: yes
+
+    - name: "2.1.4 – Set server_id if not set"
+      ansible.builtin.lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^\s*server_id\s*='
+        line: "server_id = 1"
+        insertafter: '^\[mysqld\]'
+        backup: yes
+
+    - name: "2.1.4 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [2.1.4] REMEDIATION – Point-in-Time Recovery
+          Action : Enable log_bin and set server_id
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_2_1_4_status is not defined or 'FAIL' in cis_2_1_4_status
+
+- name: "[2.2.1] Remediation – Enable Binary Log Encryption"
+  become: yes
+  block:
+    - name: "2.2.1 – Install keyring_file plugin"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "INSTALL PLUGIN keyring_file SONAME 'keyring_file.so'"
+      failed_when: false
+
+    - name: "2.2.1 – Set binlog_encryption runtime"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SET PERSIST binlog_encryption=ON"
+
+    - name: "2.2.1 – Enable binlog_encryption in config"
+      ansible.builtin.lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^\s*binlog_encryption\s*='
+        line: "binlog_encryption = ON"
+        insertafter: '^\[mysqld\]'
+        backup: yes
+
+    - name: "2.2.1 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [2.2.1] REMEDIATION – Log Encryption
+          Action : Installed keyring, enabled binlog_encryption=ON
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_2_2_1_status is not defined or 'FAIL' in cis_2_2_1_status
+
+- name: "[2.7] Remediation – Set password_lifetime ≤ 365"
+  become: yes
+  block:
+    - name: "2.7 – Set default_password_lifetime in config"
+      ansible.builtin.lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^\s*default_password_lifetime\s*='
+        line: "default_password_lifetime = 365"
+        insertafter: '^\[mysqld\]'
+        backup: yes
+
+    - name: "2.7 – Apply runtime"
+      community.mysql.mysql_variables:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        variable: default_password_lifetime
+        value: 365
+      failed_when: false
+
+    - name: "2.7 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [2.7] REMEDIATION – Password Lifetime
+          Action : Set default_password_lifetime = 365
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_2_7_status is not defined or 'FAIL' in cis_2_7_status
+
+- name: "[2.8] Remediation – Enable validate_password Component"
+  become: yes
+  block:
+    - name: "2.8 – Install validate_password component"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "INSTALL COMPONENT 'file://component_validate_password';"
+      register: install_result
+      failed_when: false
+
+    - name: "2.8 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [2.8] REMEDIATION – Strong Passwords
+          Action : Install validate_password component
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_2_8_status is not defined or 'FAIL' in cis_2_8_status
+
+- name: "[2.9] Remediation – Require Current Password for Password Reset"
+  become: yes
+  block:
+    - name: "2.9 – Set password_require_current in config"
+      ansible.builtin.lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^\s*password_require_current\s*='
+        line: "password_require_current = ON"
+        insertafter: '^\[mysqld\]'
+        backup: yes
+
+    - name: "2.9 – Apply runtime"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SET PERSIST password_require_current=ON"
+
+    - name: "2.9 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [2.9] REMEDIATION – Current Password Required
+          Action : Set password_require_current = ON
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_2_9_status is not defined or 'FAIL' in cis_2_9_status
+
+- name: "[2.12] Remediation – Set AES Encryption Mode"
+  become: yes
+  block:
+    - name: "2.12 – Set block_encryption_mode in config"
+      ansible.builtin.lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^\s*block_encryption_mode\s*='
+        line: "block_encryption_mode = aes-256-cbc"
+        insertafter: '^\[mysqld\]'
+        backup: yes
+
+    - name: "2.12 – Apply runtime"
+      community.mysql.mysql_variables:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        variable: block_encryption_mode
+        value: aes-256-cbc
+      failed_when: false
+
+    - name: "2.12 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [2.12] REMEDIATION – AES Encryption Mode
+          Action : Set block_encryption_mode = aes-256-cbc
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_2_12_status is not defined or 'FAIL' in cis_2_12_status
+
+- name: "[2.14] Remediation – Bind MySQL to Specific IP"
+  become: yes
+  block:
+    - name: "2.14 – Set bind_address in config"
+      ansible.builtin.lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^\s*bind_address\s*='
+        line: "bind_address = 127.0.0.1"
+        insertafter: '^\[mysqld\]'
+        backup: yes
+
+    - name: "2.14 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [2.14] REMEDIATION – Bind Address
+          Action : Set bind_address = 127.0.0.1
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_2_14_status is not defined or 'FAIL' in cis_2_14_status
+
+- name: "[2.15] Remediation – Limit Accepted TLS Versions"
+  become: yes
+  block:
+    - name: "2.15 – Set tls_version in config"
+      ansible.builtin.lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^\s*tls_version\s*='
+        line: "tls_version = TLSv1.2,TLSv1.3"
+        insertafter: '^\[mysqld\]'
+        backup: yes
+
+    - name: "2.15 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [2.15] REMEDIATION – TLS Version
+          Action : Set tls_version = TLSv1.2,TLSv1.3
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_2_15_status is not defined or 'FAIL' in cis_2_15_status
+
+- name: "[2.16] Remediation – Configure Client-Side Certificates"
+  become: yes
+  block:
+    - name: "2.16 – Ensure SSL cert directory exists"
+      ansible.builtin.file:
+        path: /etc/mysql/ssl
+        state: directory
+        owner: mysql
+        group: mysql
+        mode: "0750"
+
+    - name: "2.16 – Get MySQL datadir"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW VARIABLES LIKE 'datadir'"
+      register: mysql_datadir
+      changed_when: false
+
+    - name: "2.16 – Set datadir fact"
+      set_fact:
+        mysql_ssl_dir: "{{ mysql_datadir.query_result[0][0]['Value'] | default('/var/lib/mysql') }}"
+
+    - name: "2.16 – Verify SSL certs exist in datadir"
+      ansible.builtin.stat:
+        path: "{{ mysql_ssl_dir }}/ca.pem"
+      register: ca_check
+
+    - name: "2.16 – Remove old persisted SSL variables"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "{{ item }}"
+      loop:
+        - "RESET PERSIST IF EXISTS ssl_ca"
+        - "RESET PERSIST IF EXISTS ssl_cert"
+        - "RESET PERSIST IF EXISTS ssl_key"
+      failed_when: false
+
+    - name: "2.16 – Set SSL paths in config"
+      ansible.builtin.lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^\s*{{ item.key }}\s*='
+        line: "{{ item.key }} = {{ item.val }}"
+        insertafter: '^\[mysqld\]'
+        backup: yes
+      loop:
+        - { key: "ssl_ca",   val: "{{ mysql_ssl_dir }}/ca.pem" }
+        - { key: "ssl_cert", val: "{{ mysql_ssl_dir }}/server-cert.pem" }
+        - { key: "ssl_key",  val: "{{ mysql_ssl_dir }}/server-key.pem" }
+
+    - name: "2.16 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [2.16] REMEDIATION – Client Certificates
+          Action : Pointed ssl_ca/ssl_cert/ssl_key to {{ mysql_ssl_dir }}
+          Result : {{ 'APPLIED' if ca_check.stat.exists else 'FAILED – no certs found' }}
+          -----------------------------------------------------------------
+  when: cis_2_16_status is not defined or 'FAIL' in cis_2_16_status
+
+- name: "[2.17] Remediation – Restrict Ciphers"
+  become: yes
+  block:
+    - name: "2.17 – Set ssl_cipher in config"
+      ansible.builtin.lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^\s*ssl_cipher\s*='
+        line: "ssl_cipher = ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384"
+        insertafter: '^\[mysqld\]'
+        backup: yes
+
+    - name: "2.17 – Apply ssl_cipher at runtime"
+      community.mysql.mysql_variables:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        variable: ssl_cipher
+        value: "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384"
+      failed_when: false
+
+    - name: "2.17 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [2.17] REMEDIATION – Approved Ciphers
+          Action : Restrict ssl_cipher to strong ciphers
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_2_17_status is not defined or 'FAIL' in cis_2_17_status
+
+- name: "[2.18] Remediation – Install Connection Control Plugin"
+  become: yes
+  block:
+    - name: "2.18 – Install connection_control plugin"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "INSTALL PLUGIN connection_control SONAME 'connection_control.so';"
+      register: install_cc
+      failed_when: false
+
+    - name: "2.18 – Install connection_control_failed_login_attempts plugin"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "INSTALL PLUGIN connection_control_failed_login_attempts SONAME 'connection_control.so';"
+      failed_when: false
+
+    - name: "2.18 – Set connection_control_failed_connections_threshold"
+      community.mysql.mysql_variables:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        variable: connection_control_failed_connections_threshold
+        value: 3
+      failed_when: false
+
+    - name: "2.18 – Set connection_control_min_connection_delay"
+      community.mysql.mysql_variables:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        variable: connection_control_min_connection_delay
+        value: 1000
+      failed_when: false
+
+    - name: "2.18 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [2.18] REMEDIATION – Connection Delays
+          Action : Install connection_control plugin, threshold=3, delay=1000ms
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_2_18_status is not defined or 'FAIL' in cis_2_18_status
+
+- name: Restart MySQL để áp dụng config changes (SSL, bind_address, ...)
+  become: yes
+  ansible.builtin.systemd:
+    name: mysql
+    state: restarted
+    daemon_reload: yes
+  failed_when: false
+
+- name: Wait for MySQL socket
+  become: yes
+  ansible.builtin.wait_for:
+    path: /var/run/mysqld/mysqld.sock
+    state: present
+    timeout: 30
+  failed_when: false
+
+- name: Write remediation log on remote target
+  become: yes
+  copy:
+    dest: "/tmp/cis_mysql_remediation_section2.log"
+    content: "{{ remediation_lines | join('\n') }}"
+    mode: '0644'
+
+- name: Fetch log about controller
+  become: yes
+  fetch:
+    src: "/tmp/cis_mysql_remediation_section2.log"
+    dest: "../../reports/cis_mysql_remediation_section2.log"
+    flat: yes
+
+- name: Remove temp log file
+  become: yes
+  file:
+    path: "/tmp/cis_mysql_remediation_section2.log"
+    state: absent

@@ -7,11 +7,21 @@ package_update: true
 packages:
   - mysql-server
   - mysql-client
+  - python3-pymysql
   - openssl
   - curl
   - wget
 
 write_files:
+  - path: /root/.my.cnf
+    permissions: "0600"
+    owner: root:root
+    content: |
+      [client]
+      user=root
+      password=${MYSQL_ROOT_PASSWORD}
+      socket=/var/run/mysqld/mysqld.sock
+
   - path: /tmp/mysql-setup.sh
     permissions: "0755"
     content: |

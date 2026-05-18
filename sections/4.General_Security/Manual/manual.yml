@@ -1,0 +1,123 @@
+---
+- name: Init audit log buffer
+  ansible.builtin.set_fact:
+    audit_lines: []
+
+- name: "[4.1] Manual – Latest Security Patches"
+  block:
+    - name: "4.1 – Get MySQL version"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW VARIABLES WHERE Variable_name = 'version'"
+      register: check_4_1
+      changed_when: false
+
+    - name: "4.1 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [4.1] Latest Security Patches (Manual - Level 1)
+          MySQL Version : {{ check_4_1.query_result[0][0].Value }}
+          Result        : MANUAL CHECK REQUIRED – Verify latest patch at
+                          https://dev.mysql.com/doc/relnotes/mysql/8.4/en/
+          Fix           : sudo apt update && sudo apt upgrade mysql-server
+          -----------------------------------------------------------------
+
+- name: "[4.9] Manual – TDE At-Rest Encryption"
+  block:
+    - name: "4.9 – Get TDE variable status"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: |
+          SELECT VARIABLE_NAME, VARIABLE_VALUE
+          FROM performance_schema.global_variables
+          WHERE variable_name IN (
+            'binlog_encryption',
+            'innodb_redo_log_encrypt',
+            'innodb_undo_log_encrypt',
+            'table_encryption_privilege_check',
+            'general_log'
+          )
+      register: check_4_9_vars
+      changed_when: false
+
+    - name: "4.9 – Convert TDE vars to dict"
+      ansible.builtin.set_fact:
+        tde_vars: >-
+          {{
+            dict(
+              check_4_9_vars.query_result[0]
+              | map(attribute='VARIABLE_NAME')
+              | zip(check_4_9_vars.query_result[0] | map(attribute='VARIABLE_VALUE'))
+            )
+          }}
+
+    - name: "4.9 – Check unencrypted tablespaces"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: |
+          SELECT NAME FROM information_schema.INNODB_TABLESPACES
+          WHERE NAME NOT IN ('innodb_temporary','sys/sys_config')
+          AND ENCRYPTION = 'N'
+      register: check_4_9_ts
+      changed_when: false
+
+    - name: "4.9 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_4_9_status: >-
+          {%- set issues = [] -%}
+          {%- if tde_vars.get('binlog_encryption','OFF') | upper != 'ON' -%}
+            {%- set _ = issues.append('binlog_encryption=OFF') -%}
+          {%- endif -%}
+          {%- if tde_vars.get('innodb_redo_log_encrypt','OFF') | upper != 'ON' -%}
+            {%- set _ = issues.append('innodb_redo_log_encrypt=OFF') -%}
+          {%- endif -%}
+          {%- if tde_vars.get('innodb_undo_log_encrypt','OFF') | upper != 'ON' -%}
+            {%- set _ = issues.append('innodb_undo_log_encrypt=OFF') -%}
+          {%- endif -%}
+          {%- if tde_vars.get('table_encryption_privilege_check','OFF') | upper != 'ON' -%}
+            {%- set _ = issues.append('table_encryption_privilege_check=OFF') -%}
+          {%- endif -%}
+          {%- if tde_vars.get('general_log','ON') | upper != 'OFF' -%}
+            {%- set _ = issues.append('general_log=ON') -%}
+          {%- endif -%}
+          {%- if check_4_9_ts.query_result[0] | length > 0 -%}
+            {%- set _ = issues.append('Tablespace chưa mã hóa: ' ~ (check_4_9_ts.query_result[0] | map(attribute='NAME') | list | join(', '))) -%}
+          {%- endif -%}
+          {{ 'PASS' if issues | length == 0 else 'MANUAL CHECK – ' ~ issues | join(' | ') }}
+
+    - name: "4.9 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [4.9] TDE At-Rest Encryption (Manual - Level 2)
+          binlog_encryption               : {{ tde_vars.get('binlog_encryption', 'N/A') }}
+          innodb_redo_log_encrypt         : {{ tde_vars.get('innodb_redo_log_encrypt', 'N/A') }}
+          innodb_undo_log_encrypt         : {{ tde_vars.get('innodb_undo_log_encrypt', 'N/A') }}
+          table_encryption_privilege_check: {{ tde_vars.get('table_encryption_privilege_check', 'N/A') }}
+          general_log                     : {{ tde_vars.get('general_log', 'N/A') }}
+          Unencrypted tablespaces         : {{ check_4_9_ts.query_result[0] | map(attribute='NAME') | list | join(', ') | default('none') }}
+          Result                          : {{ cis_4_9_status }}
+          -----------------------------------------------------------------
+
+- name: Write audit log on remote target
+  become: yes
+  copy:
+    dest: "/tmp/cis_mysql_audit_manual_section4.log"
+    content: "{{ audit_lines | join('\n') }}"
+    mode: '0644'
+
+- name: Fetch log about controller
+  become: yes
+  fetch:
+    src: "/tmp/cis_mysql_audit_manual_section4.log"
+    dest: "../../reports/cis_mysql_audit_manual_section4.log"
+    flat: yes
+
+- name: Remove temp log file
+  become: yes
+  file:
+    path: "/tmp/cis_mysql_audit_manual_section4.log"
+    state: absent

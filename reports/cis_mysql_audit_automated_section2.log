@@ -1,0 +1,60 @@
+[2.1.4] Point-in-Time Recovery (Automated - Level 2)
+log_bin    : ON
+Result     :  PASS
+-----------------------------------------------------------------
+
+[2.2.1] Binary Log Encryption (Automated - Level 2)
+binlog_encryption : ON
+Result            :  PASS
+-----------------------------------------------------------------
+
+[2.7] Password Lifetime (Automated - Level 1)
+default_password_lifetime : 365
+Expected                  : 1-365
+Result                    :   PASS
+-----------------------------------------------------------------
+
+[2.8] Password Reset Strong Passwords (Automated - Level 1)
+validate_password_installed : Yes
+validate_password_policy    : MEDIUM
+Result                      :  PASS
+-----------------------------------------------------------------
+
+[2.9] Require Current Password (Automated - Level 2)
+password_require_current : ON
+Result                   :  PASS
+-----------------------------------------------------------------
+
+[2.12] AES Encryption Mode (Automated - Level 2)
+block_encryption_mode : aes-256-cbc
+Expected              : aes-256-ecb or aes-256-cbc
+Result                :   PASS
+-----------------------------------------------------------------
+
+[2.14] MySQL Bind Address (Automated - Level 1)
+bind_address : 0.0.0.0
+Result       :  PASS
+-----------------------------------------------------------------
+
+[2.15] TLS Version (Automated - Level 2)
+tls_version : TLSv1.2,TLSv1.3
+Result      :    PASS 
+-----------------------------------------------------------------
+
+[2.16] Client-Side Certificates (Automated - Level 2)
+ssl_ca   : ca.pem
+ssl_cert : server-cert.pem
+Result   :    PASS
+-----------------------------------------------------------------
+
+[2.17] Approved Ciphers (Automated - Level 2)
+ssl_cipher : ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384
+Result     :  PASS 
+-----------------------------------------------------------------
+
+[2.18] Connection Delays (Automated - Level 2)
+connection_control_active : True
+threshold                 : 3
+min_connection_delay      : 1000
+Result                    :  PASS
+-----------------------------------------------------------------

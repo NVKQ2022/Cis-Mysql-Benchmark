@@ -1,0 +1,83 @@
+---
+- name: Init audit log buffer
+  ansible.builtin.set_fact:
+    audit_lines: []
+
+- name: "[9.2] Audit – SOURCE_SSL_VERIFY_SERVER_CERT"
+  block:
+    - name: "9.2 – Query source_ssl_verify_server_cert"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW VARIABLES LIKE 'source_ssl_verify_server_cert'"
+      register: check_9_2
+      changed_when: false
+
+    - name: "9.2 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_9_2_val: "{{ check_9_2.query_result[0][0].Value | default('N/A (not replication)') }}"
+        cis_9_2_status: >-
+          {% if check_9_2.query_result[0] | length == 0 %}
+            N/A – not a replication replica
+          {% elif check_9_2.query_result[0][0].Value | upper == 'ON' or check_9_2.query_result[0][0].Value == '1' %}
+            PASS
+          {% else %}
+            FAIL
+          {% endif %}
+
+    - name: "9.2 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [9.2] SOURCE_SSL_VERIFY_SERVER_CERT (Automated - Level 2)
+          source_ssl_verify_server_cert : {{ cis_9_2_val }}
+          Result                       :  {{ cis_9_2_status }}
+          -----------------------------------------------------------------
+
+- name: "[9.3] Audit – SUPER privilege on replication users"
+  block:
+    - name: "9.3 – Find users with SUPER + replication privileges"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: >
+          SELECT user, host FROM mysql.user
+          WHERE super_priv = 'Y'
+          AND (repl_slave_priv = 'Y' OR repl_client_priv = 'Y')
+      register: check_9_3
+      changed_when: false
+
+    - name: "9.3 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_9_3_status: >-
+          {{ 'PASS' if check_9_3.query_result[0] | length == 0
+             else 'FAIL – ' ~ (check_9_3.query_result[0] | map(attribute='user') | list | join(', ')) }}
+
+    - name: "9.3 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [9.3] SUPER Privilege on Replication Users (Automated - Level 2)
+          Users with SUPER + replication privileges: {{ check_9_3.query_result[0] | map(attribute='user') | list | join(', ') | default('(none)') }}
+          Result :  {{ cis_9_3_status }}
+          -----------------------------------------------------------------
+
+- name: Write audit log on remote target
+  become: yes
+  copy:
+    dest: "/tmp/cis_mysql_audit_automated_section9.log"
+    content: "{{ audit_lines | join('\n') }}"
+    mode: '0644'
+
+- name: Fetch log about controller
+  become: yes
+  fetch:
+    src: "/tmp/cis_mysql_audit_automated_section9.log"
+    dest: "../../reports/cis_mysql_audit_automated_section9.log"
+    flat: yes
+
+- name: Remove temp log file
+  become: yes
+  file:
+    path: "/tmp/cis_mysql_audit_automated_section9.log"
+    state: absent

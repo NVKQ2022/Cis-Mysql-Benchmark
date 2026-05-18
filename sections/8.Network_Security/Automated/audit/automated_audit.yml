@@ -1,0 +1,114 @@
+---
+- name: Init audit log buffer
+  ansible.builtin.set_fact:
+    audit_lines: []
+
+- name: "[8.1] Audit – require_secure_transport"
+  block:
+    - name: "8.1 – Query require_secure_transport"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW VARIABLES LIKE 'require_secure_transport'"
+      register: check_8_1
+      changed_when: false
+
+    - name: "8.1 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_8_1_val: "{{ check_8_1.query_result[0][0].Value }}"
+        cis_8_1_status: "{{ 'PASS' if check_8_1.query_result[0][0].Value == 'ON' else 'FAIL' }}"
+
+    - name: "8.1 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [8.1] require_secure_transport (Automated - Level 2)
+          require_secure_transport : {{ cis_8_1_val }}
+          Result                  :  {{ cis_8_1_status }}
+          -----------------------------------------------------------------
+
+- name: "[8.2] Audit – ssl_type for remote users"
+  block:
+    - name: "8.2 – Find remote users with no SSL requirement"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: >
+          SELECT user, host, ssl_type FROM mysql.user
+          WHERE host != 'localhost' AND (ssl_type IS NULL OR ssl_type = '')
+      register: check_8_2
+      changed_when: false
+
+    - name: "8.2 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_8_2_status: >-
+          {{ 'PASS' if check_8_2.query_result[0] | length == 0
+             else 'FAIL – ' ~ (check_8_2.query_result[0] | map(attribute='user') | list | join(', ')) }}
+
+    - name: "8.2 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [8.2] ssl_type for Remote Users (Automated - Level 2)
+          Users without SSL: {{ check_8_2.query_result[0] | map(attribute='user') | list | join(', ') | default('(none)') }}
+          Result           :  {{ cis_8_2_status }}
+          -----------------------------------------------------------------
+
+- name: "[8.3] Audit – Connection Limits"
+  block:
+    - name: "8.3 – Query max_connections"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW VARIABLES LIKE 'max_connections'"
+      register: check_8_3_mc
+      changed_when: false
+
+    - name: "8.3 – Query max_user_connections"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW VARIABLES LIKE 'max_user_connections'"
+      register: check_8_3_muc
+      changed_when: false
+
+    - name: "8.3 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_8_3_max_connections: "{{ check_8_3_mc.query_result[0][0].Value | int }}"
+        cis_8_3_max_user_connections: "{{ check_8_3_muc.query_result[0][0].Value | int }}"
+        cis_8_3_status: >-
+          {% set mc = check_8_3_mc.query_result[0][0].Value | int %}
+          {% set muc = check_8_3_muc.query_result[0][0].Value | int %}
+          {% set issues = [] %}
+          {% if mc > 1000 %}{% set _ = issues.append('max_connections=' ~ mc) %}{% endif %}
+          {% if mc == 0 %}{% set _ = issues.append('max_connections=0 (unlimited)') %}{% endif %}
+          {{ 'PASS' if issues | length == 0 else 'FAIL – ' ~ issues | join(', ') }}
+
+    - name: "8.3 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [8.3] Connection Limits (Automated - Level 2)
+          max_connections      : {{ cis_8_3_max_connections }}
+          max_user_connections : {{ cis_8_3_max_user_connections }}
+          Result               :  {{ cis_8_3_status }}
+          -----------------------------------------------------------------
+
+- name: Write audit log on remote target
+  become: yes
+  copy:
+    dest: "/tmp/cis_mysql_audit_automated_section8.log"
+    content: "{{ audit_lines | join('\n') }}"
+    mode: '0644'
+
+- name: Fetch log about controller
+  become: yes
+  fetch:
+    src: "/tmp/cis_mysql_audit_automated_section8.log"
+    dest: "../../reports/cis_mysql_audit_automated_section8.log"
+    flat: yes
+
+- name: Remove temp log file
+  become: yes
+  file:
+    path: "/tmp/cis_mysql_audit_automated_section8.log"
+    state: absent

@@ -14,8 +14,8 @@ variable "image_name" {
   default     = "cis-mysql-image"
 }
 
-variable "source_vm_id" {
-  description = "Source VM ID to create image from"
+variable "vm_name" {
+  description = "VM name (to derive OS disk name)"
   type        = string
 }
 

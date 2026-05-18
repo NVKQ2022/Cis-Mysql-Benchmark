@@ -23,10 +23,10 @@ jobs:
         working-directory: intialize-environment/terraform
         run: terraform fmt -check -recursive
 
-      - name: Terraform Init
-        working-directory: intialize-environment/terraform
-        run: terraform init -backend=false
-
       - name: Terraform Validate
         working-directory: intialize-environment/terraform
         run: terraform validate
+
+      - name: Terraform Init
+        working-directory: intialize-environment/terraform
+        run: terraform init

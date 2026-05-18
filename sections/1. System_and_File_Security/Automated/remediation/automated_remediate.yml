@@ -490,7 +490,7 @@
 - name: "[6.2] Remediation – Move Logs to Non-System Partition"
   become: yes
   block:
-    - name: "6.2 – Tạo thư mục log mới"
+    - name: "6.2 – Đảm bảo thư mục /mnt/mysql-logs tồn tại"
       ansible.builtin.file:
         path: /mnt/mysql-logs
         state: directory
@@ -506,6 +506,30 @@
         insertafter: '^\[mysqld\]'
         backup: yes
 
+    - name: "6.2 – Đảm bảo file error.log tồn tại"
+      ansible.builtin.file:
+        path: /mnt/mysql-logs/error.log
+        state: touch
+        owner: mysql
+        group: mysql
+        mode: "0600"
+
+    - name: "6.2 – Thêm AppArmor rule cho /mnt/mysql-logs/"
+      ansible.builtin.copy:
+        dest: /etc/apparmor.d/local/usr.sbin.mysqld
+        content: |
+          # Allow log file access on /mnt partition
+          /mnt/mysql-logs/ r,
+          /mnt/mysql-logs/** rw,
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: "6.2 – Reload AppArmor profile"
+      ansible.builtin.command:
+        cmd: apparmor_parser -r /etc/apparmor.d/usr.sbin.mysqld
+      changed_when: false
+
     - name: "6.2 – Ghi kết quả remediation"
       set_fact:
         remediation_lines: "{{ remediation_lines + [ log_block ] }}"
@@ -513,6 +537,7 @@
         log_block: |
           [6.2] REMEDIATION – log partition
           Action : Move logs to dedicated partition
+          Path   : /mnt/mysql-logs/error.log
           Result : {{ cis_6_2_status | default('DONE') }}
           ----------------------------------------------------------------
   when: cis_6_2_status is defined and 'FAIL' in cis_6_2_status
@@ -571,6 +596,22 @@
           ----------------------------------------------------------------
   when: cis_6_4_status is defined and 'FAIL' in cis_6_4_status
 
+- name: Restart MySQL để áp dụng các thay đổi config
+  become: yes
+  ansible.builtin.systemd:
+    name: mysql
+    state: restarted
+  failed_when: false
+  when: remediation_lines | length > 0
+
+- name: Wait for MySQL socket
+  become: yes
+  ansible.builtin.wait_for:
+    path: /var/run/mysqld/mysqld.sock
+    state: present
+    timeout: 30
+  when: remediation_lines | length > 0
+
 - name: Write remediation log on remote target (tránh quá tải local connection)
   become: yes
   copy:
@@ -582,7 +623,7 @@
   become: yes
   fetch:
     src: "/tmp/cis_mysql_remediation.log"
-    dest: "./cis_mysql_remediation.log"
+    dest: "../../reports/cis_mysql_remediation_section1.log"
     flat: yes
 
 - name: Xóa file log tạm trên remote

@@ -24,13 +24,13 @@ resource "azurerm_linux_virtual_machine" "main" {
 
   disable_password_authentication = false
 
-  custom_data = base64encode(templatefile("${path.module}/cloud-init.yaml", {
+  custom_data = var.custom_data_template != "" ? base64encode(templatefile("${path.module}/${var.custom_data_template}", {
     MYSQL_ROOT_PASSWORD = var.mysql_root_password
     MYSQL_DATABASE      = var.mysql_app_database
     MYSQL_USER          = var.mysql_app_user
     MYSQL_USER_PASSWORD = var.mysql_app_user_password
     TAILSCALE_AUTH_KEY  = var.tailscale_auth_key
-  }))
+  })) : null
 
   dynamic "admin_ssh_key" {
     for_each = var.admin_ssh_public_key != "" ? [1] : []
@@ -46,12 +46,17 @@ resource "azurerm_linux_virtual_machine" "main" {
     storage_account_type = "Standard_LRS"
   }
 
-  source_image_reference {
-    publisher = "Canonical"
-    offer     = "ubuntu-24_04-lts"
-    sku       = "server"
-    version   = "latest"
+  dynamic "source_image_reference" {
+    for_each = var.custom_image_id != "" ? [] : [1]
+    content {
+      publisher = "Canonical"
+      offer     = "ubuntu-24_04-lts"
+      sku       = "server"
+      version   = "latest"
+    }
   }
+
+  source_image_id = var.custom_image_id != "" ? var.custom_image_id : null
 
   tags = var.tags
 }

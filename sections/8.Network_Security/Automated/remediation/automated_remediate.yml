@@ -1,0 +1,111 @@
+---
+- name: Init remediation log buffer
+  ansible.builtin.set_fact:
+    remediation_lines: []
+
+- name: "[8.1] Remediation – Enable require_secure_transport"
+  become: yes
+  block:
+    - name: "8.1 – Set require_secure_transport runtime"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SET PERSIST require_secure_transport=ON"
+
+    - name: "8.1 – Write to my.cnf"
+      ansible.builtin.lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^\s*require_secure_transport\s*='
+        line: "require_secure_transport = ON"
+        insertafter: '^\[mysqld\]'
+        backup: yes
+
+    - name: "8.1 – Ghi kết quả remediation"
+      ansible.builtin.set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [8.1] REMEDIATION – require_secure_transport
+          Action : Set require_secure_transport = ON
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_8_1_status is defined and 'FAIL' in cis_8_1_status
+
+- name: "[8.2] Remediation – Require SSL for remote users"
+  become: yes
+  block:
+    - name: "8.2 – Alter users to REQUIRE SSL"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "ALTER USER '{{ item.user }}'@'{{ item.host }}' REQUIRE SSL"
+      loop: "{{ check_8_2.query_result[0] }}"
+
+    - name: "8.2 – Ghi kết quả remediation"
+      ansible.builtin.set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [8.2] REMEDIATION – ssl_type for Remote Users
+          Action : Set REQUIRE SSL for {{ check_8_2.query_result[0] | length }} remote user(s)
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_8_2_status is defined and 'FAIL' in cis_8_2_status
+
+- name: "[8.3] Remediation – Set Connection Limits"
+  become: yes
+  block:
+    - name: "8.3 – Set max_connections runtime"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SET PERSIST max_connections=1000"
+
+    - name: "8.3 – Set max_user_connections runtime"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SET PERSIST max_user_connections=100"
+
+    - name: "8.3 – Write max_connections to my.cnf"
+      ansible.builtin.lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^\s*max_connections\s*='
+        line: "max_connections = 1000"
+        insertafter: '^\[mysqld\]'
+        backup: yes
+
+    - name: "8.3 – Write max_user_connections to my.cnf"
+      ansible.builtin.lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^\s*max_user_connections\s*='
+        line: "max_user_connections = 100"
+        insertafter: '^\[mysqld\]'
+        backup: yes
+
+    - name: "8.3 – Ghi kết quả remediation"
+      ansible.builtin.set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [8.3] REMEDIATION – Connection Limits
+          Action : Set max_connections=1000, max_user_connections=100
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_8_3_status is defined and 'FAIL' in cis_8_3_status
+
+- name: Write remediation log on remote target
+  become: yes
+  copy:
+    dest: "/tmp/cis_mysql_remediation_section8.log"
+    content: "{{ remediation_lines | join('\n') }}"
+    mode: '0644'
+
+- name: Fetch log about controller
+  become: yes
+  fetch:
+    src: "/tmp/cis_mysql_remediation_section8.log"
+    dest: "../../reports/cis_mysql_remediation_section8.log"
+    flat: yes
+
+- name: Remove temp log file
+  become: yes
+  file:
+    path: "/tmp/cis_mysql_remediation_section8.log"
+    state: absent

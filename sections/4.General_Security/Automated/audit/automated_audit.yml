@@ -1,0 +1,205 @@
+---
+- name: Init audit log buffer
+  ansible.builtin.set_fact:
+    audit_lines: []
+
+- name: "[4.2] Audit – Example/Test Databases"
+  block:
+    - name: "4.2 – Find example/test databases"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: |
+          SELECT SCHEMA_NAME FROM information_schema.SCHEMATA
+          WHERE SCHEMA_NAME IN ('employees','world','world_x','sakila','airportdb','menagerie','test')
+      register: check_4_2
+      changed_when: false
+
+    - name: "4.2 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_4_2_status: >-
+          {{ 'PASS' if check_4_2.query_result[0] | length == 0
+             else 'FAIL – found: ' ~ (check_4_2.query_result[0] | map(attribute='SCHEMA_NAME') | list | join(', ')) }}
+
+    - name: "4.2 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [4.2] Example/Test Databases (Automated - Level 1)
+          Found : {{ check_4_2.query_result[0] | map(attribute='SCHEMA_NAME') | list | join(', ') | default('(none)') }}
+          Result :  {{ cis_4_2_status }}
+          -----------------------------------------------------------------
+
+- name: "[4.3] Audit – allow-suspicious-udfs"
+  block:
+    - name: "4.3 – Check allow-suspicious-udfs in config"
+      ansible.builtin.shell: >
+        grep -iE "^\s*allow-suspicious-udfs" /etc/mysql/mysql.conf.d/mysqld.cnf || echo "NONE"
+      register: check_4_3
+      changed_when: false
+      failed_when: false
+
+    - name: "4.3 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_4_3_status: "{{ 'PASS' if check_4_3.stdout == 'NONE' else 'FAIL' }}"
+
+    - name: "4.3 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [4.3] allow-suspicious-udfs (Automated - Level 2)
+          Found  : {{ check_4_3.stdout | default('NONE') }}
+          Result :  {{ cis_4_3_status }}
+          -----------------------------------------------------------------
+
+- name: "[4.4] Audit – local_infile"
+  block:
+    - name: "4.4 – Check local_infile"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW VARIABLES WHERE Variable_name = 'local_infile'"
+      register: check_4_4
+      changed_when: false
+
+    - name: "4.4 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_4_4_status: "{{ 'PASS' if check_4_4.query_result[0][0].Value | upper == 'OFF' else 'FAIL' }}"
+
+    - name: "4.4 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [4.4] local_infile (Automated - Level 1)
+          Current : {{ check_4_4.query_result[0][0].Value }}
+          Result  :  {{ cis_4_4_status }}
+          -----------------------------------------------------------------
+
+- name: "[4.5] Audit – skip-grant-tables"
+  block:
+    - name: "4.5 – Check skip-grant-tables in config"
+      ansible.builtin.shell: >
+        grep -iE "^\s*skip-grant-tables\s*=?\s*(1|TRUE|ON)" /etc/mysql/mysql.conf.d/mysqld.cnf || echo "NONE"
+      register: check_4_5_cnf
+      changed_when: false
+      failed_when: false
+
+    - name: "4.5 – Check skip-grant-tables in process"
+      ansible.builtin.shell: >
+        ps aux | grep mysqld | grep "skip-grant-tables" | grep -v grep || echo "NONE"
+      register: check_4_5_proc
+      changed_when: false
+      failed_when: false
+
+    - name: "4.5 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_4_5_status: >-
+          {{ 'FAIL – in my.cnf' if check_4_5_cnf.stdout != 'NONE'
+             else ('FAIL – in process' if check_4_5_proc.stdout != 'NONE'
+             else 'PASS') }}
+
+    - name: "4.5 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [4.5] skip-grant-tables (Automated - Level 1)
+          In my.cnf : {{ check_4_5_cnf.stdout | default('NONE') }}
+          In process: {{ check_4_5_proc.stdout | default('NONE') }}
+          Result    :  {{ cis_4_5_status }}
+          -----------------------------------------------------------------
+
+- name: "[4.6] Audit – Symbolic Links"
+  block:
+    - name: "4.6 – Check have_symlink"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW VARIABLES LIKE 'have_symlink'"
+      register: check_4_6
+      changed_when: false
+
+    - name: "4.6 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_4_6_status: "{{ 'PASS' if check_4_6.query_result[0][0].Value | upper == 'DISABLED' else 'FAIL' }}"
+
+    - name: "4.6 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [4.6] Symbolic Links (Automated - Level 1)
+          have_symlink : {{ check_4_6.query_result[0][0].Value }}
+          Result       :  {{ cis_4_6_status }}
+          -----------------------------------------------------------------
+
+- name: "[4.7] Audit – secure_file_priv"
+  block:
+    - name: "4.7 – Check secure_file_priv"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW GLOBAL VARIABLES WHERE Variable_name = 'secure_file_priv'"
+      register: check_4_7
+      changed_when: false
+
+    - name: "4.7 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_4_7_val: "{{ check_4_7.query_result[0][0].Value | default('') }}"
+        cis_4_7_status: >-
+          {{ 'PASS' if check_4_7.query_result[0][0].Value | default('') not in ['', None]
+             else 'FAIL – secure_file_priv is empty' }}
+
+    - name: "4.7 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [4.7] secure_file_priv (Automated - Level 1)
+          Current : {{ cis_4_7_val | default('(empty)') }}
+          Result  :  {{ cis_4_7_status }}
+          -----------------------------------------------------------------
+
+- name: "[4.8] Audit – sql_mode STRICT_ALL_TABLES"
+  block:
+    - name: "4.8 – Check sql_mode"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW VARIABLES LIKE 'sql_mode'"
+      register: check_4_8
+      changed_when: false
+
+    - name: "4.8 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_4_8_status: >-
+          {{ 'PASS' if 'STRICT_ALL_TABLES' in check_4_8.query_result[0][0].Value
+             else 'FAIL' }}
+
+    - name: "4.8 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [4.8] sql_mode STRICT_ALL_TABLES (Automated - Level 1)
+          Current : {{ check_4_8.query_result[0][0].Value }}
+          Result  :  {{ cis_4_8_status }}
+          -----------------------------------------------------------------
+
+- name: Write audit log on remote target
+  become: yes
+  copy:
+    dest: "/tmp/cis_mysql_audit_automated_section4.log"
+    content: "{{ audit_lines | join('\n') }}"
+    mode: '0644'
+
+- name: Fetch log about controller
+  become: yes
+  fetch:
+    src: "/tmp/cis_mysql_audit_automated_section4.log"
+    dest: "../../reports/cis_mysql_audit_automated_section4.log"
+    flat: yes
+
+- name: Remove temp log file
+  become: yes
+  file:
+    path: "/tmp/cis_mysql_audit_automated_section4.log"
+    state: absent

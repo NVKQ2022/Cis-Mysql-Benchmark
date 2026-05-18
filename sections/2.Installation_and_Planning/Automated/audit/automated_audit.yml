@@ -1,0 +1,367 @@
+---
+- name: Init audit log buffer
+  ansible.builtin.set_fact:
+    audit_lines: []
+- name: "[2.1.4] Audit – Implement Point-in-Time Recovery"
+  become: yes
+  block:
+    - name: "2.1.4 – Check binary log status"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW VARIABLES LIKE 'log_bin';"
+      register: check_2_1_4
+      changed_when: false
+
+    - name: "2.1.4 – Set CIS status"
+      ansible.builtin.set_fact:
+        log_bin_value: "{{ check_2_1_4.query_result[0][0]['Value'] | default('OFF') | upper }}"
+        cis_2_1_4_status: "{{ 'PASS' if (check_2_1_4.query_result[0][0]['Value'] | default('OFF') | upper) == 'ON' else 'FAIL' }}"
+
+    - name: "2.1.4 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [2.1.4] Point-in-Time Recovery (Automated - Level 2)
+          log_bin    : {{ log_bin_value }}
+          Result     :  {{ cis_2_1_4_status }}
+          -----------------------------------------------------------------
+
+- name: "[2.2.1] Audit – Ensure Binary Logs are Encrypted"
+  become: yes
+  block:
+    - name: "2.2.1 – Check binlog encryption"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW VARIABLES LIKE 'binlog_encryption'"
+      register: check_2_2_1
+      changed_when: false
+
+    - name: "2.2.1 – Parse result"
+      ansible.builtin.set_fact:
+        binlog_encryption: "{{ check_2_2_1.query_result[0][0].Value | upper }}"
+
+    - name: "2.2.1 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_2_2_1_status: "{{ 'PASS' if binlog_encryption == 'ON' else 'FAIL' }}"
+
+    - name: "2.2.1 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [2.2.1] Binary Log Encryption (Automated - Level 2)
+          binlog_encryption : {{ binlog_encryption }}
+          Result            :  {{ cis_2_2_1_status }}
+          -----------------------------------------------------------------
+
+- name: "[2.7] Audit – Ensure password_lifetime ≤ 365"
+  become: yes
+  block:
+    - name: "2.7 – Check default_password_lifetime"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW VARIABLES LIKE 'default_password_lifetime';"
+      register: check_2_7
+      changed_when: false
+
+    - name: "2.7 – Set CIS status"
+      ansible.builtin.set_fact:
+        password_lifetime: "{{ check_2_7.query_result[0][0]['Value'] | default('0') | int }}"
+        cis_2_7_status: >-
+          {% set val = check_2_7.query_result[0][0]['Value'] | default('0') | int %}
+          {% if val > 0 and val <= 365 %}PASS{% else %}FAIL{% endif %}
+
+    - name: "2.7 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [2.7] Password Lifetime (Automated - Level 1)
+          default_password_lifetime : {{ password_lifetime }}
+          Expected                  : 1-365
+          Result                    :  {{ cis_2_7_status }}
+          -----------------------------------------------------------------
+
+- name: "[2.8] Audit – Ensure Password Resets Require Strong Passwords"
+  become: yes
+  block:
+    - name: "2.8 – Check validate_password component"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: |
+          SELECT INSTALL_COMPONENT('file://component_validate_password')
+          WHERE NOT EXISTS (
+            SELECT 1 FROM mysql.component
+            WHERE component_urn = 'file://component_validate_password'
+          );
+      register: check_2_8_installed
+      changed_when: false
+      failed_when: false
+
+    - name: "2.8 – Query password policy variables"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: |
+          SHOW VARIABLES LIKE 'validate_password%';
+      register: check_2_8
+      changed_when: false
+
+    - name: "2.8 – Set CIS status"
+      ansible.builtin.set_fact:
+        validate_policy: "{{ (check_2_8.query_result[0] | selectattr('Variable_name', 'equalto', 'validate_password.policy') | map(attribute='Value') | first | default('')) | upper }}"
+        cis_2_8_status: "{{ 'PASS' if (check_2_8.query_result[0] | length > 0) else 'FAIL – validate_password not installed' }}"
+
+    - name: "2.8 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [2.8] Password Reset Strong Passwords (Automated - Level 1)
+          validate_password_installed : {{ 'Yes' if (check_2_8.query_result[0] | length > 0) else 'No' }}
+          validate_password_policy    : {{ validate_policy | default('N/A') }}
+          Result                      :  {{ cis_2_8_status }}
+          -----------------------------------------------------------------
+
+- name: "[2.9] Audit – Require Current Password for Password Reset"
+  become: yes
+  block:
+    - name: "2.9 – Check password_require_current"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW VARIABLES LIKE 'password_require_current';"
+      register: check_2_9
+      changed_when: false
+
+    - name: "2.9 – Set CIS status"
+      ansible.builtin.set_fact:
+        require_current: "{{ check_2_9.query_result[0][0]['Value'] | default('OFF') | upper }}"
+        cis_2_9_status: "{{ 'PASS' if (check_2_9.query_result[0][0]['Value'] | default('OFF') | upper) == 'ON' else 'FAIL' }}"
+
+    - name: "2.9 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [2.9] Require Current Password (Automated - Level 2)
+          password_require_current : {{ require_current }}
+          Result                   :  {{ cis_2_9_status }}
+          -----------------------------------------------------------------
+
+- name: "[2.12] Audit – Ensure AES Encryption Mode is Configured Correctly"
+  become: yes
+  block:
+    - name: "2.12 – Check block_encryption_mode"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW VARIABLES LIKE 'block_encryption_mode';"
+      register: check_2_12
+      changed_when: false
+
+    - name: "2.12 – Set CIS status"
+      ansible.builtin.set_fact:
+        aes_mode: "{{ check_2_12.query_result[0][0]['Value'] | default('') }}"
+        cis_2_12_status: >-
+          {% set mode = check_2_12.query_result[0][0]['Value'] | default('') %}
+          {% if 'aes-256' in mode | lower %}PASS{% else %}FAIL{% endif %}
+
+    - name: "2.12 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [2.12] AES Encryption Mode (Automated - Level 2)
+          block_encryption_mode : {{ aes_mode }}
+          Expected              : aes-256-ecb or aes-256-cbc
+          Result                :  {{ cis_2_12_status }}
+          -----------------------------------------------------------------
+
+- name: "[2.14] Audit – Ensure MySQL is Bound to a Specific IP Address"
+  become: yes
+  block:
+    - name: "2.14 – Check bind_address"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW VARIABLES LIKE 'bind_address';"
+      register: check_2_14
+      changed_when: false
+
+    - name: "2.14 – Set bind_address"
+      ansible.builtin.set_fact:
+        bind_address: "{{ check_2_14.query_result[0][0]['Value'] | default('') }}"
+
+    - name: "2.14 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_2_14_status: "{{ 'FAIL' if (bind_address == '*') else 'PASS' }}"
+
+    - name: "2.14 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [2.14] MySQL Bind Address (Automated - Level 1)
+          bind_address : {{ bind_address }}
+          Result       :  {{ cis_2_14_status }}
+          -----------------------------------------------------------------
+
+- name: "[2.15] Audit – Limit Accepted TLS Versions"
+  become: yes
+  block:
+    - name: "2.15 – Check tls_version"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW VARIABLES LIKE 'tls_version';"
+      register: check_2_15
+      changed_when: false
+
+    - name: "2.15 – Set tls_version"
+      ansible.builtin.set_fact:
+        tls_version: "{{ check_2_15.query_result[0][0]['Value'] | default('') }}"
+
+    - name: "2.15 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_2_15_status: >-
+          {% set tls = tls_version | lower %}
+          {% if 'tlsv1.3' in tls or 'tlsv1.2' in tls %}
+          PASS
+          {% elif 'tlsv1' in tls and 'tlsv1.2' not in tls and 'tlsv1.3' not in tls %}
+          FAIL – TLS 1.0/1.1 accepted
+          {% else %}
+          FAIL
+          {% endif %}
+
+    - name: "2.15 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [2.15] TLS Version (Automated - Level 2)
+          tls_version : {{ tls_version }}
+          Result      :  {{ cis_2_15_status }}
+          -----------------------------------------------------------------
+
+- name: "[2.16] Audit – Require Client-Side Certificates (X.509)"
+  become: yes
+  block:
+    - name: "2.16 – Check SSL CA and cert"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: |
+          SELECT VARIABLE_NAME, VARIABLE_VALUE
+          FROM performance_schema.global_variables
+          WHERE VARIABLE_NAME IN ('ssl_ca', 'ssl_cert', 'ssl_key');
+      register: check_2_16
+      changed_when: false
+
+    - name: "2.16 – Set CIS status"
+      ansible.builtin.set_fact:
+        ssl_ca: "{{ (check_2_16.query_result[0] | selectattr('VARIABLE_NAME', 'equalto', 'ssl_ca') | map(attribute='VARIABLE_VALUE') | first | default('')) }}"
+        cis_2_16_status: >-
+          {% set ca = (check_2_16.query_result[0] | selectattr('VARIABLE_NAME', 'equalto', 'ssl_ca') | map(attribute='VARIABLE_VALUE') | first | default('')) %}
+          {% set cert = (check_2_16.query_result[0] | selectattr('VARIABLE_NAME', 'equalto', 'ssl_cert') | map(attribute='VARIABLE_VALUE') | first | default('')) %}
+          {% if ca != '' and cert != '' %}PASS{% else %}FAIL{% endif %}
+
+    - name: "2.16 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [2.16] Client-Side Certificates (Automated - Level 2)
+          ssl_ca   : {{ ssl_ca | default('(not set)') }}
+          ssl_cert : {{ (check_2_16.query_result[0] | selectattr('VARIABLE_NAME', 'equalto', 'ssl_cert') | map(attribute='VARIABLE_VALUE') | first | default('(not set)')) }}
+          Result   :  {{ cis_2_16_status }}
+          -----------------------------------------------------------------
+
+- name: "[2.17] Audit – Ensure Only Approved Ciphers are Used"
+  become: yes
+  block:
+    - name: "2.17 – Check ssl_cipher"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW VARIABLES LIKE 'ssl_cipher';"
+      register: check_2_17
+      changed_when: false
+
+    - name: "2.17 – Set ssl_cipher"
+      ansible.builtin.set_fact:
+        ssl_cipher: "{{ check_2_17.query_result[0][0]['Value'] | default('') }}"
+
+    - name: "2.17 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_2_17_status: >-
+          {% if ssl_cipher == '' %}FAIL – no cipher restriction
+          {% elif 'ECDHE' in ssl_cipher or 'DHE' in ssl_cipher %}PASS
+          {% else %}FAIL – weak ciphers{% endif %}
+
+    - name: "2.17 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [2.17] Approved Ciphers (Automated - Level 2)
+          ssl_cipher : {{ ssl_cipher | default('(not set)') }}
+          Result     :  {{ cis_2_17_status }}
+          -----------------------------------------------------------------
+
+- name: "[2.18] Audit – Implement Connection Delays"
+  become: yes
+  block:
+    - name: "2.18 – Check connection_control plugin"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: |
+          SELECT PLUGIN_NAME, PLUGIN_STATUS
+          FROM information_schema.PLUGINS
+          WHERE PLUGIN_NAME LIKE 'connection_control%';
+      register: check_2_18
+      changed_when: false
+
+    - name: "2.18 – Check connection_delay settings"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: |
+          SHOW VARIABLES WHERE Variable_name IN (
+            'connection_control_failed_connections_threshold',
+            'connection_control_min_connection_delay'
+          );
+      register: check_2_18_vars
+      changed_when: false
+
+    - name: "2.18 – Set CIS status"
+      ansible.builtin.set_fact:
+        cc_installed: "{{ (check_2_18.query_result[0] | selectattr('PLUGIN_STATUS', 'equalto', 'ACTIVE') | list | length) > 0 }}"
+        cc_threshold: "{{ (check_2_18_vars.query_result[0] | selectattr('Variable_name', 'equalto', 'connection_control_failed_connections_threshold') | map(attribute='Value') | first | default('')) }}"
+        cc_delay: "{{ (check_2_18_vars.query_result[0] | selectattr('Variable_name', 'equalto', 'connection_control_min_connection_delay') | map(attribute='Value') | first | default('')) }}"
+        cis_2_18_status: "{{ 'PASS' if (check_2_18.query_result[0] | selectattr('PLUGIN_STATUS', 'equalto', 'ACTIVE') | list | length) > 0 else 'FAIL' }}"
+
+    - name: "2.18 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [2.18] Connection Delays (Automated - Level 2)
+          connection_control_active : {{ cc_installed | default(false) }}
+          threshold                 : {{ cc_threshold | default('N/A') }}
+          min_connection_delay      : {{ cc_delay | default('N/A') }}
+          Result                    :  {{ cis_2_18_status }}
+          -----------------------------------------------------------------
+
+- name: Write audit log on remote target
+  become: yes
+  copy:
+    dest: "/tmp/cis_mysql_audit_automated_section2.log"
+    content: "{{ audit_lines | join('\n') }}"
+    mode: '0644'
+
+- name: Fetch log about controller
+  become: yes
+  fetch:
+    src: "/tmp/cis_mysql_audit_automated_section2.log"
+    dest: "../../reports/cis_mysql_audit_automated_section2.log"
+    flat: yes
+
+- name: Remove temp log file
+  become: yes
+  file:
+    path: "/tmp/cis_mysql_audit_automated_section2.log"
+    state: absent

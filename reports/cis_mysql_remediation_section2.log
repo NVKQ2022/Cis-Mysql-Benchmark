@@ -1,0 +1,34 @@
+[2.2.1] REMEDIATION – Log Encryption
+Action : Installed keyring, enabled binlog_encryption=ON
+Result : APPLIED
+-----------------------------------------------------------------
+
+[2.7] REMEDIATION – Password Lifetime
+Action : Set default_password_lifetime = 365
+Result : APPLIED
+-----------------------------------------------------------------
+
+[2.8] REMEDIATION – Strong Passwords
+Action : Install validate_password component
+Result : APPLIED
+-----------------------------------------------------------------
+
+[2.9] REMEDIATION – Current Password Required
+Action : Set password_require_current = ON
+Result : APPLIED
+-----------------------------------------------------------------
+
+[2.12] REMEDIATION – AES Encryption Mode
+Action : Set block_encryption_mode = aes-256-cbc
+Result : APPLIED
+-----------------------------------------------------------------
+
+[2.17] REMEDIATION – Approved Ciphers
+Action : Restrict ssl_cipher to strong ciphers
+Result : APPLIED
+-----------------------------------------------------------------
+
+[2.18] REMEDIATION – Connection Delays
+Action : Install connection_control plugin, threshold=3, delay=1000ms
+Result : APPLIED
+-----------------------------------------------------------------

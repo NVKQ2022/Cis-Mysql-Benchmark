@@ -74,22 +74,72 @@ variable "tailscale_auth_key" {
   default     = ""
 }
 
+variable "tailscale_auth_key_hardened" {
+  description = "Tailscale auth key for hardened VM"
+  type        = string
+  default     = ""
+}
+
 variable "snapshot_name" {
   description = "Snapshot name"
   type        = string
   default     = "cis-mysql-snapshot"
 }
 
-variable "create_snapshot" {
-  description = "Create snapshot of VM"
-  type        = bool
-  default     = false
-}
+
 
 variable "image_name" {
   description = "Custom image name"
   type        = string
   default     = "cis-mysql-image"
+}
+
+
+
+
+variable "create_resource_group" {
+  description = "Create resource group"
+  type        = bool
+  default     = true
+}
+
+variable "create_networking" {
+  description = "Create networking resources"
+  type        = bool
+  default     = true
+}
+variable "vnet_name" {
+  description = "Virtual network name"
+  type        = string
+  default     = "cis-mysql-vnet"
+}
+variable "vnet_address_space" {
+  description = "Virtual network address space"
+  type        = list(string)
+  default     = [" 10.0.0.0/16"]
+}
+variable "subnet_name" {
+  description = "Subnet name"
+  type        = string
+  default     = "cis-mysql-subnet"
+}
+variable "subnet_address_prefix" {
+  description = "Subnet address prefix"
+  type        = string
+  default     = "10.0.0.0/24"
+}
+
+variable "create_vm" {
+  description = "Create VM"
+  type        = bool
+  default     = true
+}
+
+
+variable "create_snapshot" {
+  description = "Create snapshot of VM"
+  type        = bool
+  default     = false
 }
 
 variable "create_image" {
@@ -98,8 +148,38 @@ variable "create_image" {
   default     = false
 }
 
+variable "custom_image_id" {
+  description = "Custom image resource ID. If empty, uses Ubuntu 24.04 marketplace image."
+  type        = string
+  default     = ""
+}
+
+variable "gallery_name" {
+  description = "Azure Compute Gallery name"
+  type        = string
+  default     = "cis-mysql-gallery"
+}
+
+variable "image_version" {
+  description = "Image version for Compute Gallery (e.g. 1.0.0)"
+  type        = string
+  default     = "1.0.0"
+}
+
 variable "tags" {
   description = "Tags"
+  type        = map(string)
+  default     = {}
+}
+
+variable "cis_report_description" {
+  description = "CIS benchmark summary for gallery image description (max 4096 chars)"
+  type        = string
+  default     = "CIS MySQL hardened image"
+}
+
+variable "cis_report_tags" {
+  description = "CIS benchmark summary tags for gallery image (each value max 256 chars)"
   type        = map(string)
   default     = {}
 }

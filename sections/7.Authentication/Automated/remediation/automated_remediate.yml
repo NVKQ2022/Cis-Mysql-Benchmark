@@ -1,0 +1,217 @@
+---
+- name: Init remediation log buffer
+  ansible.builtin.set_fact:
+    remediation_lines: []
+
+- name: "[7.1] Remediation – Migrate to caching_sha2_password"
+  become: yes
+  block:
+    - name: "7.1 – Migrate to caching_sha2_password"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: >
+          ALTER USER '{{ item.user }}'@'{{ item.host }}'
+          IDENTIFIED WITH caching_sha2_password
+          BY RANDOM PASSWORD PASSWORD EXPIRE
+      loop: "{{ check_7_1.query_result[0] }}"
+      when: item.user != 'root'
+
+    - name: "7.1 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        non_root_count: "{{ check_7_1.query_result[0] | selectattr('user', '!=', 'root') | list | length }}"
+        log_block: |
+          [7.1] REMEDIATION – Authentication Plugin
+          Action : Migrated {{ non_root_count }} non-root user(s) to caching_sha2_password
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_7_1_status is defined and 'FAIL' in cis_7_1_status
+
+- name: "[7.2] Remediation – Remove Password from Config"
+  become: yes
+  block:
+    - name: "7.2 – Remove password= lines from config files"
+      ansible.builtin.replace:
+        path: "{{ item.split(':')[0] }}"
+        regexp: '^\s*password\s*=.*$'
+        replace: ''
+      loop: "{{ check_7_2.stdout_lines }}"
+      when: "':' in item"
+
+    - name: "7.2 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [7.2] REMEDIATION – Password in Config
+          Action : Removed password= from config files
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_7_2_status is defined and 'FAIL' in cis_7_2_status
+
+- name: "[7.3] Remediation – Set Passwords for Accounts"
+  become: yes
+  block:
+    - name: "7.3 – Set RANDOM PASSWORD for accounts"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "ALTER USER '{{ item.User }}'@'{{ item.host }}' IDENTIFIED BY RANDOM PASSWORD PASSWORD EXPIRE"
+      loop: "{{ check_7_3.query_result[0] }}"
+      when: item.User != ''
+
+    - name: "7.3 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [7.3] REMEDIATION – Accounts Without Password
+          Action : Set RANDOM PASSWORD for {{ check_7_3.query_result[0] | length }} account(s)
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_7_3_status is defined and 'FAIL' in cis_7_3_status
+
+- name: "[7.4] Remediation – Set Password Lifetime"
+  become: yes
+  block:
+    - name: "7.4 – Set default_password_lifetime runtime"
+      community.mysql.mysql_variables:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        variable: default_password_lifetime
+        value: "365"
+
+    - name: "7.4 – Write to my.cnf"
+      ansible.builtin.ini_file:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        section: mysqld
+        option: default_password_lifetime
+        value: "365"
+
+    - name: "7.4 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [7.4] REMEDIATION – Password Lifetime
+          Action : Set default_password_lifetime = 365
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_7_4_status is defined and 'FAIL' in cis_7_4_status
+
+- name: "[7.5] Remediation – Set Password Complexity"
+  become: yes
+  block:
+    - name: "7.5 – Check if validate_password is installed"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SELECT COUNT(*) AS cnt FROM mysql.component WHERE component_urn LIKE '%validate_password'"
+      register: vp_check
+
+    - name: "7.5 – Install validate_password component"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "INSTALL COMPONENT 'file://component_validate_password'"
+      when: vp_check.query_result[0][0].cnt | int == 0
+
+    - name: "7.5 – Create dictionary file"
+      ansible.builtin.copy:
+        dest: /etc/mysql/password_dict.txt
+        content: |
+          password
+          123456
+          qwerty
+          admin
+          welcome
+          letmein
+          monkey
+          dragon
+          master
+          mysql
+          database
+        owner: mysql
+        group: mysql
+        mode: '0640'
+
+    - name: "7.5 – Apply STRONG policy"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "{{ item }}"
+      loop:
+        - "SET PERSIST validate_password.length=14"
+        - "SET PERSIST validate_password.policy=STRONG"
+        - "SET PERSIST validate_password.check_user_name=ON"
+        - "SET PERSIST validate_password.mixed_case_count=1"
+        - "SET PERSIST validate_password.number_count=1"
+        - "SET PERSIST validate_password.special_char_count=1"
+        - "SET PERSIST validate_password.dictionary_file='/etc/mysql/password_dict.txt'"
+
+    - name: "7.5 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [7.5] REMEDIATION – Password Complexity
+          Action : Installed validate_password, applied STRONG policy
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_7_5_status is defined and 'FAIL' in cis_7_5_status
+
+- name: "[7.6] Remediation – Drop Wildcard Hostname Users"
+  become: yes
+  block:
+    - name: "7.6 – Drop users with wildcard hostname"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "DROP USER '{{ item.user }}'@'%'"
+      loop: "{{ check_7_6.query_result[0] }}"
+
+    - name: "7.6 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [7.6] REMEDIATION – Wildcard Hostname
+          Action : Dropped {{ check_7_6.query_result[0] | length }} user(s) with '%' host
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_7_6_status is defined and 'FAIL' in cis_7_6_status
+
+- name: "[7.7] Remediation – Drop Anonymous Accounts"
+  become: yes
+  block:
+    - name: "7.7 – Drop anonymous accounts"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "DROP USER ''@'{{ item.host }}'"
+      loop: "{{ check_7_7.query_result[0] }}"
+
+    - name: "7.7 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [7.7] REMEDIATION – Anonymous Accounts
+          Action : Dropped {{ check_7_7.query_result[0] | length }} anonymous account(s)
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_7_7_status is defined and 'FAIL' in cis_7_7_status
+
+- name: Write remediation log on remote target
+  become: yes
+  copy:
+    dest: "/tmp/cis_mysql_remediation_section7.log"
+    content: "{{ remediation_lines | join('\n') }}"
+    mode: '0644'
+
+- name: Fetch log about controller
+  become: yes
+  fetch:
+    src: "/tmp/cis_mysql_remediation_section7.log"
+    dest: "../../reports/cis_mysql_remediation_section7.log"
+    flat: yes
+
+- name: Remove temp log file
+  become: yes
+  file:
+    path: "/tmp/cis_mysql_remediation_section7.log"
+    state: absent

@@ -486,12 +486,14 @@
         or item.stat.mode != '0400'
         or item.stat.pw_name != 'mysql'
         or item.stat.gr_name != 'mysql'
+    - name: "3.7 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_3_7_status: "{{ 'PASS' if (bad_ssl_files | length == 0) else 'FAIL' }}"
+
     - name: "3.7 – Ghi kết quả"
       ansible.builtin.set_fact:
         audit_lines: "{{ audit_lines + [ log_block ] }}"
       vars:
-        cis_3_7_status: "{{ 'PASS' if (bad_ssl_files | length == 0) else 'FAIL' }}"
-
         log_block: |
           [3.7] SSL Key Files Permissions (Automated - Level 1)
 
@@ -577,37 +579,35 @@
 
 - name: "[6.2] Audit - Log Files Stored on Non-System Partition"
   block:
-    - name: "6.2 - Query log_bin_basename"
+    - name: "6.2 - Query log_error path"
       become: true
       community.mysql.mysql_query:
-        login_unix_socket: "{{ mysql_socket | default('/var/run/mysqld/mysqld.sock') }}"
-        query: "SELECT @@global.log_bin_basename;"
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SELECT @@global.log_error;"
       register: check_6_2
       changed_when: false
       failed_when: false
 
     - name: "6.2 - Set audit values"
       ansible.builtin.set_fact:
-        log_bin_basename: "{{ check_6_2.query_result[0][0]['@@global.log_bin_basename'] | default('') | string | trim }}"
+        log_error_path: "{{ check_6_2.query_result[0][0]['@@global.log_error'] | default('') | string | trim }}"
 
     - name: "6.2 - Set log directory"
       ansible.builtin.set_fact:
-        log_bin_dir: "{{ log_bin_basename | dirname }}"
+        log_error_dir: "{{ log_error_path | dirname }}"
 
     - name: "6.2 - Set CIS status"
       ansible.builtin.set_fact:
         cis_6_2_status: >-
           {{
-            'FAIL'
+            'PASS'
             if (
-              log_bin_basename | length == 0
-              or log_bin_dir == '/'
-              or log_bin_dir == '/var'
-              or log_bin_dir is match('^/var/')
-              or log_bin_dir == '/usr'
-              or log_bin_dir is match('^/usr/')
+              log_error_path | length > 0
+              and log_error_dir not in ['/', '/var', '/usr']
+              and not (log_error_dir is match('^/var/'))
+              and not (log_error_dir is match('^/usr/'))
             )
-            else 'PASS'
+            else 'FAIL'
           }}
 
     - name: "6.2 - Ghi kết quả"
@@ -615,10 +615,10 @@
         audit_lines: "{{ audit_lines + [log_block] }}"
       vars:
         log_block: |
-          [6.2] Binary Log File Location
-          Current : {{ log_bin_basename | default('(not set)', true) }}
-          Directory: {{ log_bin_dir | default('(none)', true) }}
-          Result  : {{ cis_6_2_status }}
+          [6.2] Log Files on Non-System Partition
+          Error Log : {{ log_error_path | default('(not set)', true) }}
+          Directory : {{ log_error_dir | default('(none)', true) }}
+          Result    : {{ cis_6_2_status }}
           ----------------------------------------------------------------
 
 - name: "[6.3] Audit - log_error_verbosity Set to '2'"
@@ -626,7 +626,7 @@
     - name: "6.3 - Query log_error_verbosity"
       become: true
       community.mysql.mysql_query:
-        login_unix_socket: "{{ mysql_socket | default('/var/run/mysqld/mysqld.sock') }}"
+        login_unix_socket: /var/run/mysqld/mysqld.sock
         query: "SHOW GLOBAL VARIABLES LIKE 'log_error_verbosity';"
       register: check_6_3
       changed_when: false
@@ -652,23 +652,15 @@
   block:
     - name: "6.4 - Read my.cnf"
       become: true
-      ansible.builtin.slurp:
-        src: "{{ mysql_cnf_path | default('/etc/my.cnf') }}"
+      ansible.builtin.command:
+        cmd: grep -m1 '^\s*log-raw\s*=\s*' "{{ mysql_cnf_path | default('/etc/mysql/mysql.conf.d/mysqld.cnf') }}" || true
       register: check_6_4
       changed_when: false
       failed_when: false
 
-    - name: "6.4 - Extract active log-raw entries"
-      ansible.builtin.set_fact:
-        log_raw_values: >-
-          {{
-            (check_6_4.content | default('') | b64decode)
-            | regex_findall('(?im)^\\s*log-raw\\s*=\\s*([^\\s#;]+)')
-          }}
-
     - name: "6.4 - Set current value"
       ansible.builtin.set_fact:
-        log_raw_current: "{{ log_raw_values | last | default('') | string | trim }}"
+        log_raw_current: "{{ (check_6_4.stdout | default('') | trim).split('=')[-1] | trim }}"
 
     - name: "6.4 - Set CIS status"
       ansible.builtin.set_fact:
@@ -680,7 +672,7 @@
       vars:
         log_block: |
           [6.4] log-raw Configuration (Automated)
-          Config  : {{ mysql_cnf_path | default('/etc/my.cnf') }}
+          Config  : {{ mysql_cnf_path | default('/etc/mysql/mysql.conf.d/mysqld.cnf') }}
           Current : {{ log_raw_current | default('(not set)', true) }}
           Result  : {{ cis_6_4_status }}
           ----------------------------------------------------------------
@@ -699,7 +691,7 @@
   become: yes
   fetch:
     src: "/tmp/cis_mysql_audit_automated.log"
-    dest: "./cis_mysql_audit_automated.log"
+    dest: "../../reports/cis_mysql_audit_automated_section1.log"
     flat: yes
 
 - name: Xóa file log tạm trên remote

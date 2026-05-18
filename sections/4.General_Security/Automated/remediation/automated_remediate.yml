@@ -1,0 +1,186 @@
+---
+- name: Init remediation log buffer
+  ansible.builtin.set_fact:
+    remediation_lines: []
+
+- name: "[4.2] Remediation – Drop Example/Test Databases"
+  become: yes
+  block:
+    - name: "4.2 – Drop example/test databases"
+      community.mysql.mysql_db:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        name: "{{ item.SCHEMA_NAME }}"
+        state: absent
+      loop: "{{ check_4_2.query_result[0] }}"
+
+    - name: "4.2 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [4.2] REMEDIATION – Example/Test Databases
+          Action : Dropped: {{ check_4_2.query_result[0] | map(attribute='SCHEMA_NAME') | list | join(', ') }}
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_4_2_status is defined and 'FAIL' in cis_4_2_status
+
+- name: "[4.3] Remediation – Remove allow-suspicious-udfs"
+  become: yes
+  block:
+    - name: "4.3 – Remove allow-suspicious-udfs from config"
+      ansible.builtin.lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: '^\s*allow-suspicious-udfs'
+        state: absent
+        backup: yes
+
+    - name: "4.3 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [4.3] REMEDIATION – allow-suspicious-udfs
+          Action : Removed allow-suspicious-udfs from config
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_4_3_status is defined and 'FAIL' in cis_4_3_status
+
+- name: "[4.4] Remediation – Disable local_infile"
+  become: yes
+  block:
+    - name: "4.4 – Set local-infile=0 in config"
+      ansible.builtin.ini_file:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        section: mysqld
+        option: local-infile
+        value: "0"
+
+    - name: "4.4 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [4.4] REMEDIATION – local_infile
+          Action : Set local-infile=0 in config
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_4_4_status is defined and 'FAIL' in cis_4_4_status
+
+- name: "[4.5] Remediation – Disable skip-grant-tables"
+  become: yes
+  block:
+    - name: "4.5 – Set skip-grant-tables=FALSE in config"
+      ansible.builtin.ini_file:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        section: mysqld
+        option: skip-grant-tables
+        value: "FALSE"
+      when: check_4_5_cnf.stdout | default('NONE') != 'NONE'
+
+    - name: "4.5 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [4.5] REMEDIATION – skip-grant-tables
+          Action : Set skip-grant-tables=FALSE in config
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_4_5_status is defined and 'FAIL' in cis_4_5_status
+
+- name: "[4.6] Remediation – Disable Symbolic Links"
+  become: yes
+  block:
+    - name: "4.6 – Add skip-symbolic-links=YES to config"
+      ansible.builtin.ini_file:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        section: mysqld
+        option: skip-symbolic-links
+        value: "YES"
+
+    - name: "4.6 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [4.6] REMEDIATION – Symbolic Links
+          Action : Added skip-symbolic-links=YES to config
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_4_6_status is defined and 'FAIL' in cis_4_6_status
+
+- name: "[4.7] Remediation – Configure secure_file_priv"
+  become: yes
+  block:
+    - name: "4.7 – Create secure_file_priv directory"
+      ansible.builtin.file:
+        path: /var/lib/mysql-files
+        state: directory
+        owner: mysql
+        group: mysql
+        mode: "0750"
+
+    - name: "4.7 – Set secure_file_priv in config"
+      ansible.builtin.ini_file:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        section: mysqld
+        option: secure_file_priv
+        value: /var/lib/mysql-files
+
+    - name: "4.7 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [4.7] REMEDIATION – secure_file_priv
+          Action : Created /var/lib/mysql-files and set secure_file_priv
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_4_7_status is defined and 'FAIL' in cis_4_7_status
+
+- name: "[4.8] Remediation – Set sql_mode with STRICT_ALL_TABLES"
+  become: yes
+  block:
+    - name: "4.8 – Set sql_mode runtime"
+      community.mysql.mysql_variables:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        variable: sql_mode
+        value: "STRICT_ALL_TABLES,ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION"
+
+    - name: "4.8 – Set sql_mode in config"
+      ansible.builtin.ini_file:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        section: mysqld
+        option: sql_mode
+        value: "STRICT_ALL_TABLES,ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION"
+
+    - name: "4.8 – Ghi kết quả remediation"
+      set_fact:
+        remediation_lines: "{{ remediation_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [4.8] REMEDIATION – sql_mode STRICT_ALL_TABLES
+          Action : Set sql_mode with STRICT_ALL_TABLES
+          Result : APPLIED
+          -----------------------------------------------------------------
+  when: cis_4_8_status is defined and 'FAIL' in cis_4_8_status
+
+- name: Write remediation log on remote target
+  become: yes
+  copy:
+    dest: "/tmp/cis_mysql_remediation_section4.log"
+    content: "{{ remediation_lines | join('\n') }}"
+    mode: '0644'
+
+- name: Fetch log about controller
+  become: yes
+  fetch:
+    src: "/tmp/cis_mysql_remediation_section4.log"
+    dest: "../../reports/cis_mysql_remediation_section4.log"
+    flat: yes
+
+- name: Remove temp log file
+  become: yes
+  file:
+    path: "/tmp/cis_mysql_remediation_section4.log"
+    state: absent

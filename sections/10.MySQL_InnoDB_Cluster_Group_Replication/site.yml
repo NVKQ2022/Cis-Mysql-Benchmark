@@ -1,0 +1,30 @@
+---
+- name: CIS MySQL Benchmark - Section 10 InnoDB Cluster / Group Replication Audits
+  hosts: mysql_servers
+  gather_facts: yes
+  become: yes
+  tasks:
+    - name: Install PyMySQL for MySQL modules
+      ansible.builtin.apt:
+        name: python3-pymysql
+        state: present
+
+    - name: Create /root/.my.cnf for MySQL auth
+      ansible.builtin.copy:
+        dest: /root/.my.cnf
+        content: |
+          [client]
+          user=root
+          password=RootPass123!
+          socket=/var/run/mysqld/mysqld.sock
+        mode: '0600'
+        owner: root
+        group: root
+
+    - name: Run automated audit
+      ansible.builtin.import_tasks: Automated/audit/automated_audit.yml
+      when: audit_type is not defined or audit_type == 'automated'
+
+    - name: Run manual audit
+      ansible.builtin.import_tasks: Manual/manual.yml
+      when: audit_type is not defined or audit_type == 'manual'

@@ -122,7 +122,7 @@
   become: yes
   fetch:
     src: "/tmp/cis_mysql_audit_manual.log"
-    dest: "./cis_mysql_audit_manual.log"
+    dest: "../../reports/cis_mysql_audit_manual_section1.log"
     flat: yes
 
 - name: Xóa file log tạm trên remote

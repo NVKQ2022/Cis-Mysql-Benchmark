@@ -1,0 +1,99 @@
+---
+- name: Init audit log buffer
+  ansible.builtin.set_fact:
+    audit_lines: []
+
+- name: "[10.1] Audit – Group Replication Traffic Security"
+  block:
+    - name: "10.1 – Query group replication SSL variables"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW VARIABLES LIKE 'group_replication_ssl%'"
+      register: check_10_1_ssl
+      changed_when: false
+      failed_when: false
+
+    - name: "10.1 – Query group replication recovery SSL"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW VARIABLES LIKE 'group_replication_recovery%ssl%'"
+      register: check_10_1_recovery
+      changed_when: false
+      failed_when: false
+
+    - name: "10.1 – Query group replication SSL status"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW STATUS LIKE 'group_replication_ssl_status'"
+      register: check_10_1_status
+      changed_when: false
+      failed_when: false
+
+    - name: "10.1 – Check group replication active"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW STATUS LIKE 'group_replication_primary_member'"
+      register: check_10_1_gr
+      changed_when: false
+      failed_when: false
+
+    - name: "10.1 – Parse group replication status"
+      ansible.builtin.set_fact:
+        gr_ssl_vars: "{{ check_10_1_ssl.query_result[0] | default([]) }}"
+        gr_recovery_vars: "{{ check_10_1_recovery.query_result[0] | default([]) }}"
+        gr_ssl_status: "{{ check_10_1_status.query_result[0][0].Value | default('') if check_10_1_status.query_result[0] | length > 0 else '' }}"
+        gr_active: "{{ check_10_1_gr.query_result[0] | length > 0 and check_10_1_gr.query_result[0][0].Value | default('') != '' }}"
+
+    - name: "10.1 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_10_1_status: >-
+          {% if not gr_active %}
+            N/A – group replication not configured
+          {% elif gr_ssl_status != 'ON' %}
+            FAIL – group_replication_ssl_status is {{ gr_ssl_status | default('(not found)') }}
+          {% else %}
+            PASS – group replication SSL is ON
+          {% endif %}
+
+    - name: "10.1 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [10.1] Group Replication Traffic Security (Automated - Level 3)
+          Group replication active : {{ gr_active | string }}
+          SSL status               : {{ gr_ssl_status | default('(not found)') }}
+          SSL variables:
+          ----------------------------------------------------------------
+          {% for row in gr_ssl_vars %}
+          {{ row.Variable_name }} = {{ row.Value }}
+          {% endfor %}
+          {% for row in gr_recovery_vars %}
+          {{ row.Variable_name }} = {{ row.Value }}
+          {% endfor %}
+          {% if gr_ssl_vars | length == 0 and gr_recovery_vars | length == 0 %}
+          (no group replication variables found)
+          {% endif %}
+          ----------------------------------------------------------------
+          Result :  {{ cis_10_1_status }}
+          -----------------------------------------------------------------
+
+- name: Write audit log on remote target
+  become: yes
+  copy:
+    dest: "/tmp/cis_mysql_audit_automated_section10.log"
+    content: "{{ audit_lines | join('\n') }}"
+    mode: '0644'
+
+- name: Fetch log about controller
+  become: yes
+  fetch:
+    src: "/tmp/cis_mysql_audit_automated_section10.log"
+    dest: "../../reports/cis_mysql_audit_automated_section10.log"
+    flat: yes
+
+- name: Remove temp log file
+  become: yes
+  file:
+    path: "/tmp/cis_mysql_audit_automated_section10.log"
+    state: absent

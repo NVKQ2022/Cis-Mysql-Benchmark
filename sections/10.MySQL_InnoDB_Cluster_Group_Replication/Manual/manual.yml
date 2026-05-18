@@ -1,0 +1,78 @@
+---
+- name: Init audit log buffer
+  ansible.builtin.set_fact:
+    audit_lines: []
+
+- name: "[10.1] Manual – Ensure all group replication traffic is secured"
+  block:
+    - name: "10.1 – Additional group replication info"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: |
+          SHOW VARIABLES LIKE 'group_replication_%';
+      register: check_10_1_manual
+      changed_when: false
+      failed_when: false
+
+    - name: "10.1 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [10.1] Group Replication Traffic Security (Manual - Level 3)
+          Verify that group_replication_ssl_mode is set to REQUIRED
+          and group_replication_recovery_use_ssl is ON.
+          Current configuration:
+          ----------------------------------------------------------------
+          {% for row in check_10_1_manual.query_result[0] | default([]) %}
+          {{ row.Variable_name }} = {{ row.Value }}
+          {% endfor %}
+          ----------------------------------------------------------------
+          Result : MANUAL REVIEW REQUIRED
+          -----------------------------------------------------------------
+
+- name: "[10.2] Manual – Allowlist approved servers"
+  block:
+    - name: "10.2 – Check group_replication_ip_allowlist"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW VARIABLES LIKE 'group_replication_ip_allowlist'"
+      register: check_10_2
+      changed_when: false
+      failed_when: false
+
+    - name: "10.2 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [10.2] Allowlist Approved Servers (Manual - Level 3)
+          group_replication_ip_allowlist:
+          {% if check_10_2.query_result[0] | length > 0 %}
+          {{ check_10_2.query_result[0][0].Value | default('(not set)') }}
+          {% else %}
+          (group replication not configured)
+          {% endif %}
+          Review: Ensure only trusted servers are in the allowlist.
+          Result : MANUAL REVIEW REQUIRED
+          -----------------------------------------------------------------
+
+- name: Write audit log on remote target
+  become: yes
+  copy:
+    dest: "/tmp/cis_mysql_audit_manual_section10.log"
+    content: "{{ audit_lines | join('\n') }}"
+    mode: '0644'
+
+- name: Fetch log about controller
+  become: yes
+  fetch:
+    src: "/tmp/cis_mysql_audit_manual_section10.log"
+    dest: "../../reports/cis_mysql_audit_manual_section10.log"
+    flat: yes
+
+- name: Remove temp log file
+  become: yes
+  file:
+    path: "/tmp/cis_mysql_audit_manual_section10.log"
+    state: absent

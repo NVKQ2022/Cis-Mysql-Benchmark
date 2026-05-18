@@ -1,0 +1,55 @@
+---
+- name: Init audit log buffer
+  ansible.builtin.set_fact:
+    audit_lines: []
+
+- name: "[9.1] Manual – Ensure replication traffic is secured"
+  block:
+    - name: "9.1 – Check replication SSL status"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: |
+          SHOW VARIABLES LIKE 'ssl_%';
+          SHOW STATUS LIKE 'ssl_%';
+      register: check_9_1
+      changed_when: false
+      failed_when: false
+
+    - name: "9.1 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [9.1] Replication Traffic Security (Manual - Level 2)
+          Action : Review replication SSL/TLS configuration manually
+          SSL variables available (review for replication config):
+          ----------------------------------------------------------------
+          {% for row in check_9_1.query_result[0] | default([]) %}
+          {{ row.Variable_name }} = {{ row.Value }}
+          {% endfor %}
+          Replication status:
+          {% for row in check_9_1.query_result[1] | default([]) %}
+          {{ row.Variable_name }} = {{ row.Value }}
+          {% endfor %}
+          Result : MANUAL REVIEW REQUIRED
+          -----------------------------------------------------------------
+
+- name: Write audit log on remote target
+  become: yes
+  copy:
+    dest: "/tmp/cis_mysql_audit_manual_section9.log"
+    content: "{{ audit_lines | join('\n') }}"
+    mode: '0644'
+
+- name: Fetch log about controller
+  become: yes
+  fetch:
+    src: "/tmp/cis_mysql_audit_manual_section9.log"
+    dest: "../../reports/cis_mysql_audit_manual_section9.log"
+    flat: yes
+
+- name: Remove temp log file
+  become: yes
+  file:
+    path: "/tmp/cis_mysql_audit_manual_section9.log"
+    state: absent

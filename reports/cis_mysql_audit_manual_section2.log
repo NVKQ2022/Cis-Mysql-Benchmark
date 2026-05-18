@@ -1,0 +1,109 @@
+[2.1.1] Backup Policy (Manual - Level 1)
+Status : MANUAL CHECK REQUIRED
+Action : Verify that a documented backup policy exists,
+         including schedule, retention, and responsibilities.
+-----------------------------------------------------------------
+
+[2.1.2] Backup Validation (Manual - Level 2)
+Status : MANUAL CHECK REQUIRED
+Action : Verify that backup restoration tests are performed
+         regularly (e.g., monthly restore drills).
+-----------------------------------------------------------------
+
+[2.1.3] Secure Backup Credentials (Manual - Level 1)
+Status : MANUAL CHECK REQUIRED
+Action : Verify that backup scripts do not store MySQL
+         credentials in plain text. Use mysql_config_editor
+         or a secrets management solution.
+-----------------------------------------------------------------
+
+[2.1.5] Disaster Recovery Plan (Manual - Level 2)
+Status : MANUAL CHECK REQUIRED
+Action : Verify that a documented DR plan exists, including
+         RPO/RTO objectives, failover procedures, and contact lists.
+-----------------------------------------------------------------
+
+[2.1.6] Backup Configuration Files (Manual - Level 2)
+Status    : MANUAL CHECK REQUIRED
+Configs found:
+  - /etc/mysql/mysql.cnf
+  - /etc/mysql/debian.cnf
+Action    : Ensure these files are included in the backup policy.
+-----------------------------------------------------------------
+
+[2.3] Dedicated Machine (Manual - Level 1)
+Status : MANUAL CHECK REQUIRED
+Action : Verify that the MySQL server runs on a dedicated
+         machine (not shared with web server, app server, etc.).
+-----------------------------------------------------------------
+
+[2.4] Passwords on Command Line (Manual - Level 1)
+Status : MANUAL CHECK REQUIRED
+Review the following processes for password arguments:
+mysql       6999  3.1 43.3 1786720 396124 ?      Ssl  17:20   0:00 /usr/sbin/mysqld
+Action : Verify no MySQL processes expose passwords in cmdline.
+-----------------------------------------------------------------
+
+[2.5] Username Reuse (Manual - Level 2)
+Current users:
+  - app_user@%
+  - debian-sys-maint@localhost
+  - mysql.infoschema@localhost
+  - mysql.session@localhost
+  - mysql.sys@localhost
+  - root@localhost
+Action : Verify that usernames are unique and do not match
+         OS account names or application service accounts.
+-----------------------------------------------------------------
+
+[2.6] Unique Cryptographic Material (Manual - Level 2)
+SSL certificates found:
+  - /var/lib/mysql/server-cert.pem
+  - /var/lib/mysql/public_key.pem
+  - /var/lib/mysql/server-key.pem
+  - /var/lib/mysql/ca.pem
+  - /var/lib/mysql/client-key.pem
+  - /var/lib/mysql/ca-key.pem
+  - /var/lib/mysql/private_key.pem
+  - /var/lib/mysql/client-cert.pem
+Action : Verify SHA256 fingerprints differ from default
+         auto-generated certificates (`openssl x509 -fingerprint -in <file>`).
+-----------------------------------------------------------------
+
+[2.10] Dual Passwords (Manual - Level 2)
+Users with dual password attribute:
+  (none found)
+Action : Consider using dual passwords for privileged accounts
+         requiring frequent rotation.
+-----------------------------------------------------------------
+
+[2.11] Lock Unused Accounts (Manual - Level 1)
+Locked/expired accounts:
+  - mysql.infoschema@localhost
+    locked=Y, expired=N
+  - mysql.session@localhost
+    locked=Y, expired=N
+  - mysql.sys@localhost
+    locked=Y, expired=N
+All MySQL accounts:
+  - app_user@% (locked=N)
+  - debian-sys-maint@localhost (locked=N)
+  - mysql.infoschema@localhost (locked=Y)
+  - mysql.session@localhost (locked=Y)
+  - mysql.sys@localhost (locked=Y)
+  - root@localhost (locked=N)
+Action : Review and lock any accounts not currently in use.
+-----------------------------------------------------------------
+
+[2.13] Socket Peer-Credential Authentication (Manual - Level 2)
+Users using auth_socket/unix_socket:
+  (none found)
+Action : Consider using auth_socket for local service accounts
+         to avoid password-based auth.
+-----------------------------------------------------------------
+
+[2.19] FIPS 140-2 Cryptography (Manual - Level 2)
+OpenSSL FIPS check  : Check manually
+MySQL SSL version   : 
+Result              :  MANUAL CHECK REQUIRED
+-----------------------------------------------------------------

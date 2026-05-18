@@ -1,0 +1,9 @@
+[1.1] datadir Partition Configuration (Manual - Level 1)
+datadir    : /var/lib/mysql/
+Mounted on : /
+Result     :  FAIL 
+----------------------------------------------------------------
+
+[1.7] Sandbox Environment (Automated - Level 1)
+Result :  PASS (systemd) 
+----------------------------------------------------------------

@@ -1,0 +1,80 @@
+
+  +----------------------------------------------------------------+
+  | CIS MySQL Security Benchmark                                   |
+  | Audit & Remediation Summary                                    |
+  | Generated: 2026-05-19 00:49:46                                 |
+  +----------------------------------------------------------------+
+
+  +----------------------------------------------------------------+
+  | Audit Results by Section                                       |
+  +----------------------------------------------------------------+
+  .------------------------------.--------.--------.--------.--------.
+  | Section                      |   PASS |   FAIL |    N/A |  TOTAL |
+  |------------------------------|--------|--------|--------|--------|
+  | automated - section1         |     17 |      0 |      0 |     17 |
+  | automated - section2         |     11 |      0 |      0 |     11 |
+  | automated - section4         |      7 |      0 |      0 |      7 |
+  | manual - section1            |      1 |      1 |      0 |      2 |
+  | manual - section2            |      0 |      0 |      8 |      8 |
+  | manual - section4            |      0 |      0 |      2 |      2 |
+  |------------------------------|--------|--------|--------|--------|
+  | TOTAL                        |     36 |      1 |     10 |     47 |
+  '------------------------------'--------'--------'--------'--------'
+
+  PASS RATE: 36/37 (97%)
+
+  +----------------------------------------------------------------+
+  | Remediation Results by Section                                 |
+  +----------------------------------------------------------------+
+  .------------------------------.--------.--------.--------.--------.
+  | Section                      |   DONE | APPLIED |   FAIL |  TOTAL |
+  |------------------------------|--------|--------|--------|--------|
+  | section1                     |      6 |      0 |      1 |      7 |
+  | section2                     |      0 |      7 |      0 |      7 |
+  | section4                     |      0 |      1 |      0 |      1 |
+  |------------------------------|--------|--------|--------|--------|
+  | TOTAL                        |      6 |      8 |      1 |     15 |
+  '------------------------------'--------'--------'--------'--------'
+
+  +----------------------------------------------------------------+
+  | Failed Audit Items                                             |
+  +----------------------------------------------------------------+
+  [FAIL] [1.1]    datadir Partition Configuration (Manual - Level 1)
+
+  +----------------------------------------------------------------+
+  | Manual Checks Requiring Attention                              |
+  +----------------------------------------------------------------+
+  [INFO] [2.1.1]  Backup Policy (Manual - Level 1)
+  [INFO] [2.1.2]  Backup Validation (Manual - Level 2)
+  [INFO] [2.1.3]  Secure Backup Credentials (Manual - Level 1)
+  [INFO] [2.1.5]  Disaster Recovery Plan (Manual - Level 2)
+  [INFO] [2.1.6]  Backup Configuration Files (Manual - Level 2)
+  [INFO] [2.3]    Dedicated Machine (Manual - Level 1)
+  [INFO] [2.4]    Passwords on Command Line (Manual - Level 1)
+  [INFO] [2.19]   FIPS 140-2 Cryptography (Manual - Level 2)
+  [INFO] [4.1]    Latest Security Patches (Manual - Level 1)
+  [INFO] [4.9]    TDE At-Rest Encryption (Manual - Level 2)
+
+  +----------------------------------------------------------------+
+  | Remediation Failures                                           |
+  +----------------------------------------------------------------+
+  [FAIL] [6.2]    REMEDIATION – log partition
+
+  +----------------------------------------------------------------+
+  | Overall Assessment                                             |
+  +----------------------------------------------------------------+
+
+  RESULT: FAIL — Issues detected, review and remediate.
+
+    Category                  Count
+    ------------------------------ 
+    Audit failures               1
+    Manual checks pending       10
+    Remediation failures         1
+
+  +----------------------------------------------------------------+
+  | Report dir: /home/quan/projects/schoolProjects/LTKB/Cis-Mysql-Benchmark/reports |
+  | Script    : summarize-reports.sh                                |
+  | Generated : 2026-05-19 00:49:47                                 |
+  +----------------------------------------------------------------+
+

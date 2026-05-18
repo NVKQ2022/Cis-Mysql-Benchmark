@@ -1,0 +1,16 @@
+[4.1] Latest Security Patches (Manual - Level 1)
+MySQL Version : 8.0.45-0ubuntu0.24.04.1
+Result        : MANUAL CHECK REQUIRED – Verify latest patch at
+                https://dev.mysql.com/doc/relnotes/mysql/8.4/en/
+Fix           : sudo apt update && sudo apt upgrade mysql-server
+-----------------------------------------------------------------
+
+[4.9] TDE At-Rest Encryption (Manual - Level 2)
+binlog_encryption               : ON
+innodb_redo_log_encrypt         : OFF
+innodb_undo_log_encrypt         : OFF
+table_encryption_privilege_check: OFF
+general_log                     : OFF
+Unencrypted tablespaces         : mysql, innodb_undo_001, innodb_undo_002
+Result                          : MANUAL CHECK – innodb_redo_log_encrypt=OFF | innodb_undo_log_encrypt=OFF | table_encryption_privilege_check=OFF | Tablespace chưa mã hóa: mysql, innodb_undo_001, innodb_undo_002
+-----------------------------------------------------------------

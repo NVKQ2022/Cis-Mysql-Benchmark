@@ -1,0 +1,239 @@
+---
+- name: Init audit log buffer
+  ansible.builtin.set_fact:
+    audit_lines: []
+
+- name: "[7.1] Audit – Authentication Plugin"
+  block:
+    - name: "7.1 – Find users using mysql_native_password"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SELECT host, user, plugin FROM mysql.user WHERE plugin = 'mysql_native_password'"
+      register: check_7_1
+      changed_when: false
+
+    - name: "7.1 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_7_1_status: >-
+          {{ 'PASS' if check_7_1.query_result[0] | length == 0
+             else 'FAIL – ' ~ (check_7_1.query_result[0] | map(attribute='user') | list | join(', ')) }}
+
+    - name: "7.1 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [7.1] Authentication Plugin (Automated - Level 1)
+          Users on mysql_native_password: {{ check_7_1.query_result[0] | map(attribute='user') | list | join(', ') | default('(none)') }}
+          Result :  {{ cis_7_1_status }}
+          -----------------------------------------------------------------
+
+- name: "[7.2] Audit – Password in Config"
+  block:
+    - name: "7.2 – Find password= in /etc/mysql/"
+      ansible.builtin.shell: >
+        grep -rniE "^\s*password\s*=" /etc/mysql/ 2>/dev/null | grep -v "^#" || echo "NONE"
+      register: check_7_2
+      changed_when: false
+      failed_when: false
+
+    - name: "7.2 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_7_2_status: "{{ 'PASS' if check_7_2.stdout == 'NONE' else 'FAIL' }}"
+
+    - name: "7.2 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [7.2] Password in Config File (Automated - Level 1)
+          Found  : {{ check_7_2.stdout | default('NONE') }}
+          Result :  {{ cis_7_2_status }}
+          -----------------------------------------------------------------
+
+- name: "[7.3] Audit – Accounts Without Password"
+  block:
+    - name: "7.3 – Find accounts without password"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: >
+          SELECT User, host FROM mysql.user
+          WHERE (plugin IN ('sha256_password','caching_sha2_password')
+                 AND LENGTH(authentication_string) = 0)
+          UNION
+          SELECT User, host FROM mysql.user
+          WHERE (plugin IN ('mysql_native_password','mysql_old_password','')
+                 AND (LENGTH(authentication_string) = 0 OR authentication_string IS NULL))
+      register: check_7_3
+      changed_when: false
+
+    - name: "7.3 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_7_3_status: >-
+          {{ 'PASS' if check_7_3.query_result[0] | length == 0
+             else 'FAIL – ' ~ (check_7_3.query_result[0] | map(attribute='User') | list | join(', ')) }}
+
+    - name: "7.3 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [7.3] Accounts Without Password (Automated - Level 1)
+          Found : {{ check_7_3.query_result[0] | map(attribute='User') | list | join(', ') | default('(none)') }}
+          Result :  {{ cis_7_3_status }}
+          -----------------------------------------------------------------
+
+- name: "[7.4] Audit – Password Lifetime"
+  block:
+    - name: "7.4 – Check default_password_lifetime"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW VARIABLES LIKE 'default_password_lifetime'"
+      register: check_7_4
+      changed_when: false
+
+    - name: "7.4 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_7_4_val: "{{ check_7_4.query_result[0][0].Value | int }}"
+        cis_7_4_status: >-
+          {{ 'PASS' if (check_7_4.query_result[0][0].Value | int > 0
+             and check_7_4.query_result[0][0].Value | int <= 365)
+             else 'FAIL – current: ' ~ check_7_4.query_result[0][0].Value }}
+
+    - name: "7.4 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [7.4] Password Lifetime (Automated - Level 1)
+          Current : {{ cis_7_4_val }}
+          Result  :  {{ cis_7_4_status }}
+          -----------------------------------------------------------------
+
+- name: "[7.5] Audit – Password Complexity"
+  block:
+    - name: "7.5 – Check validate_password component"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SELECT component_urn FROM mysql.component WHERE component_urn LIKE '%validate_password'"
+      register: check_7_5_comp
+      changed_when: false
+
+    - name: "7.5 – Check validate_password config"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SHOW VARIABLES LIKE 'validate_password%'"
+      register: check_7_5_cfg
+      changed_when: false
+
+    - name: "7.5 – Convert vars to dict"
+      ansible.builtin.set_fact:
+        vp_vars: >-
+          {{
+            dict(
+              check_7_5_cfg.query_result[0]
+              | map(attribute='Variable_name')
+              | zip(check_7_5_cfg.query_result[0] | map(attribute='Value'))
+            )
+          }}
+
+    - name: "7.5 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_7_5_status: >-
+          {%- set issues = [] -%}
+          {%- if check_7_5_comp.query_result[0] | length == 0 -%}
+            {%- set _ = issues.append('component not installed') -%}
+          {%- endif -%}
+          {%- if vp_vars.get('validate_password.length','0') | int < 14 -%}
+            {%- set _ = issues.append('length<14') -%}
+          {%- endif -%}
+          {%- if vp_vars.get('validate_password.policy','') | upper != 'STRONG' -%}
+            {%- set _ = issues.append('policy!=STRONG') -%}
+          {%- endif -%}
+          {%- if vp_vars.get('validate_password.check_user_name','OFF') | upper != 'ON' -%}
+            {%- set _ = issues.append('check_user_name!=ON') -%}
+          {%- endif -%}
+          {{ 'PASS' if issues | length == 0 else 'FAIL – ' ~ issues | join(', ') }}
+
+    - name: "7.5 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [7.5] Password Complexity (Automated - Level 1)
+          Component installed : {{ 'YES' if check_7_5_comp.query_result[0] | length > 0 else 'NO' }}
+          length              : {{ vp_vars.get('validate_password.length', 'N/A') }}
+          policy              : {{ vp_vars.get('validate_password.policy', 'N/A') }}
+          check_user_name     : {{ vp_vars.get('validate_password.check_user_name', 'N/A') }}
+          Result              :  {{ cis_7_5_status }}
+          -----------------------------------------------------------------
+
+- name: "[7.6] Audit – Wildcard Hostname"
+  block:
+    - name: "7.6 – Find users with wildcard hostname '%'"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SELECT user, host FROM mysql.user WHERE host = '%'"
+      register: check_7_6
+      changed_when: false
+
+    - name: "7.6 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_7_6_status: >-
+          {{ 'PASS' if check_7_6.query_result[0] | length == 0
+             else 'FAIL – ' ~ (check_7_6.query_result[0] | map(attribute='user') | list | join(', ')) }}
+
+    - name: "7.6 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [7.6] Wildcard Hostname (Automated - Level 1)
+          Users with '%' host: {{ check_7_6.query_result[0] | map(attribute='user') | list | join(', ') | default('(none)') }}
+          Result :  {{ cis_7_6_status }}
+          -----------------------------------------------------------------
+
+- name: "[7.7] Audit – Anonymous Accounts"
+  block:
+    - name: "7.7 – Find anonymous accounts"
+      community.mysql.mysql_query:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        query: "SELECT user, host FROM mysql.user WHERE user = ''"
+      register: check_7_7
+      changed_when: false
+
+    - name: "7.7 – Set CIS status"
+      ansible.builtin.set_fact:
+        cis_7_7_status: >-
+          {{ 'PASS' if check_7_7.query_result[0] | length == 0
+             else 'FAIL – anonymous hosts: ' ~ (check_7_7.query_result[0] | map(attribute='host') | list | join(', ')) }}
+
+    - name: "7.7 – Ghi kết quả"
+      ansible.builtin.set_fact:
+        audit_lines: "{{ audit_lines + [ log_block ] }}"
+      vars:
+        log_block: |
+          [7.7] Anonymous Accounts (Automated - Level 1)
+          Anonymous hosts: {{ check_7_7.query_result[0] | map(attribute='host') | list | join(', ') | default('(none)') }}
+          Result :  {{ cis_7_7_status }}
+          -----------------------------------------------------------------
+
+- name: Write audit log on remote target
+  become: yes
+  copy:
+    dest: "/tmp/cis_mysql_audit_automated_section7.log"
+    content: "{{ audit_lines | join('\n') }}"
+    mode: '0644'
+
+- name: Fetch log about controller
+  become: yes
+  fetch:
+    src: "/tmp/cis_mysql_audit_automated_section7.log"
+    dest: "../../reports/cis_mysql_audit_automated_section7.log"
+    flat: yes
+
+- name: Remove temp log file
+  become: yes
+  file:
+    path: "/tmp/cis_mysql_audit_automated_section7.log"
+    state: absent

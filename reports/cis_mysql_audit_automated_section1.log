@@ -1,0 +1,112 @@
+[1.2] Use Dedicated Least Privileged Account (Automated - Level 1)
+Command : pgrep -u mysql mysqld
+Output  : 1059
+Result  : PASS
+----------------------------------------------------------------
+
+[1.3] Disable MySQL Command History (Automated - Level 2)
+Files found : 
+Result      : PASS
+----------------------------------------------------------------
+
+[1.4] MYSQL_PWD Environment Variable (Automated - Level 1)
+Processes using MYSQL_PWD: 
+Result : PASS
+----------------------------------------------------------------
+
+[1.5] Interactive Login Disabled (Automated - Level 2)
+Current shell : /bin/false
+Result        :  PASS 
+----------------------------------------------------------------
+
+[1.6] MYSQL_PWD in User Profiles (Automated - Level 1)
+Result : PASS
+----------------------------------------------------------------
+
+[3.1] datadir Permissions
+datadir  : /var/lib/mysql/
+Result   : PASS – 0750, mysql:mysql 
+----------------------------------------------------------------
+
+[3.2] log_bin_basename Permissions (Automated - Level 1)
+log_bin_basename : /var/lib/mysql/binlog
+Files:
+  - /var/lib/mysql/binlog.000003 → 0660 mysql:mysql
+  - /var/lib/mysql/binlog.index → 0660 mysql:mysql
+  - /var/lib/mysql/binlog.000001 → 0660 mysql:mysql
+  - /var/lib/mysql/binlog.000006 → 0660 mysql:mysql
+  - /var/lib/mysql/binlog.000004 → 0660 mysql:mysql
+  - /var/lib/mysql/binlog.000008 → 0660 mysql:mysql
+  - /var/lib/mysql/binlog.000005 → 0660 mysql:mysql
+  - /var/lib/mysql/binlog.000002 → 0660 mysql:mysql
+  - /var/lib/mysql/binlog.000009 → 0660 mysql:mysql
+  - /var/lib/mysql/binlog.000007 → 0660 mysql:mysql
+Result :  PASS 
+----------------------------------------------------------------
+
+[3.3] log_error Permissions (Automated - Level 1)
+File   : /mnt/mysql-logs/error.log
+Result :     PASS
+
+----------------------------------------------------------------
+
+[3.4] slow_query_log Permissions (Automated - Level 1)
+slow_query_log      : OFF
+slow_query_log_file : /var/lib/mysql/cis-mysql-vm-hardened-slow.log
+Result              :  PASS – slow_query_log OFF 
+----------------------------------------------------------------
+
+[3.5] relay_log_basename Permissions (Automated - Level 1)
+relay_log_basename : /var/lib/mysql/cis-mysql-vm-hardened-relay-bin
+Result             : PASS
+----------------------------------------------------------------
+
+[3.6] general_log_file Permissions (Automated - Level 1)
+general_log      : OFF
+general_log_file : /var/lib/mysql/cis-mysql-vm-hardened.log
+Result           :  PASS 
+
+[3.7] SSL Key Files Permissions (Automated - Level 1)
+
+Files:
+  - /var/lib/mysql//ca.pem
+  → 0400
+  mysql:mysql
+  - /var/lib/mysql//server-cert.pem
+  → 0400
+  mysql:mysql
+  - /var/lib/mysql//server-key.pem
+  → 0400
+  mysql:mysql
+
+Bad Files:
+  None
+Result : PASS
+
+[3.8] Plugin Directory Permissions (Automated - Level 1)
+plugin_dir : /usr/lib/mysql/plugin/
+Result     :  PASS – hiện tại: 0550, mysql:mysql
+----------------------------------------------------------------
+
+[6.1] log_error Configuration (Automated)
+Current : /mnt/mysql-logs/error.log
+Result  : PASS
+----------------------------------------------------------------
+
+[6.2] Log Files on Non-System Partition
+Error Log : /mnt/mysql-logs/error.log
+Directory : /mnt/mysql-logs
+Result    : PASS
+----------------------------------------------------------------
+
+[6.3] log_error_verbosity (Automated)
+Current : 2
+Expected: 2
+Result  : PASS
+----------------------------------------------------------------
+
+[6.4] log-raw Configuration (Automated)
+Config  : /etc/mysql/mysql.conf.d/mysqld.cnf
+Current : OFF
+Result  : PASS
+----------------------------------------------------------------

@@ -3,16 +3,7 @@ variable "resource_group_name" {
   type        = string
 }
 
-variable "remote_backend" {
-  description = "Backend resource group name"
-  type        = map(string)
-  default = {
-    backend_resource_group_name  = "remotebackend-rg"
-    backend_storage_account_name = "remotebackendfortfstate"
-    backend_container_name       = "tfstate"
-    backend_key                  = "cis-mysql-backend.tfstate"
-  }
-}
+
 
 
 variable "location" {
@@ -83,6 +74,18 @@ variable "tailscale_auth_key" {
   description = "Tailscale auth key"
   type        = string
   default     = ""
+}
+
+variable "custom_image_id" {
+  description = "Custom image resource ID. If empty, uses Ubuntu 24.04 marketplace image."
+  type        = string
+  default     = ""
+}
+
+variable "custom_data_template" {
+  description = "Cloud-init template file (relative to module path). Set empty to skip."
+  type        = string
+  default     = "cloud-init.yaml"
 }
 
 variable "tags" {
